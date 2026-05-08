@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using CharacterKiller.Core.Interfaces;
 using CharacterKiller.Core.Models;
+using CharacterKiller.Core.Services;
 using CharacterKiller.Application.Prompts;
 using Microsoft.Extensions.Logging;
 
@@ -43,12 +44,23 @@ public class SkillsPipeline
 
         var summaryText = await File.ReadAllTextAsync(summaryPath, ct);
 
-        // 2. 如果 summary 过长，先分片压缩提炼
+        // 2. 如果 summary 过长，先分片压缩提炼（结果缓存到磁盘，避免重复压缩）
         if (taskConfig.SkillsMaxContextChars > 0 && summaryText.Length > taskConfig.SkillsMaxContextChars)
         {
-            _logger.LogInformation("Summary 长度为 {Length}，超过阈值 {Threshold}，启动分片压缩...", summaryText.Length, taskConfig.SkillsMaxContextChars);
-            summaryText = await CompressSummaryAsync(taskConfig.CharacterName, summaryText, taskConfig.SkillsMaxContextChars, ct);
-            _logger.LogInformation("压缩后 summary 长度：{Length}", summaryText.Length);
+            var compressedPath = Path.Combine(taskConfig.OutputDirectory, "summaries", $"compressed_{Sanitize(taskConfig.CharacterName)}.md");
+            if (File.Exists(compressedPath) && new FileInfo(compressedPath).Length > 0)
+            {
+                _logger.LogInformation("发现已有压缩 summary，直接读取：{Path}", compressedPath);
+                summaryText = await File.ReadAllTextAsync(compressedPath, ct);
+            }
+            else
+            {
+                _logger.LogInformation("Summary 长度为 {Length}，超过阈值 {Threshold}，启动分片压缩...", summaryText.Length, taskConfig.SkillsMaxContextChars);
+                summaryText = await CompressSummaryAsync(taskConfig.CharacterName, summaryText, taskConfig.SkillsMaxContextChars, ct);
+                _logger.LogInformation("压缩后 summary 长度：{Length}", summaryText.Length);
+                await AtomicFileWriter.WriteAllTextAsync(compressedPath, summaryText, ct);
+                _logger.LogInformation("压缩结果已缓存：{Path}", compressedPath);
+            }
         }
 
         // 3. 计算 Checkpoint ID（任务类型 + 角色名 + 输出模式）
@@ -139,62 +151,17 @@ public class SkillsPipeline
         }
 
         // 6. 保存生成文件
-        string outputBaseDir;
-        string mainDir;
-        string? codeDir = null;
+        var (mainDir, codeDir) = isTemplate
+            ? (
+                Path.Combine(taskConfig.OutputDirectory, "templates", $"{Sanitize(taskConfig.CharacterName)}-template-main"),
+                Path.Combine(taskConfig.OutputDirectory, "templates", $"{Sanitize(taskConfig.CharacterName)}-template-code")
+              )
+            : (
+                Path.Combine(taskConfig.OutputDirectory, "roleplay", $"{Sanitize(taskConfig.CharacterName)}-roleplay-main"),
+                Path.Combine(taskConfig.OutputDirectory, "roleplay", $"{Sanitize(taskConfig.CharacterName)}-roleplay-code")
+              );
 
-        if (isTemplate)
-        {
-            outputBaseDir = Path.Combine(taskConfig.OutputDirectory, "templates");
-            mainDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-template-main");
-            codeDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-template-code");
-
-            Directory.CreateDirectory(mainDir);
-            Directory.CreateDirectory(codeDir);
-
-            foreach (var (relativePath, content) in files)
-            {
-                // 写入主目录
-                var mainFilePath = Path.Combine(mainDir, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(mainFilePath)!);
-                await File.WriteAllTextAsync(mainFilePath, content, ct);
-                _logger.LogInformation("写入 template 文件：{Path}", mainFilePath);
-
-                // 写入 code 目录（排除 limit.md）
-                if (!relativePath.Equals("limit.md", StringComparison.OrdinalIgnoreCase))
-                {
-                    var codeFilePath = Path.Combine(codeDir, relativePath);
-                    Directory.CreateDirectory(Path.GetDirectoryName(codeFilePath)!);
-                    await File.WriteAllTextAsync(codeFilePath, content, ct);
-                }
-            }
-        }
-        else
-        {
-            outputBaseDir = Path.Combine(taskConfig.OutputDirectory, "roleplay");
-            mainDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-roleplay-main");
-            codeDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-roleplay-code");
-
-            Directory.CreateDirectory(mainDir);
-            Directory.CreateDirectory(codeDir);
-
-            foreach (var (relativePath, content) in files)
-            {
-                // 写入主目录
-                var mainFilePath = Path.Combine(mainDir, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(mainFilePath)!);
-                await File.WriteAllTextAsync(mainFilePath, content, ct);
-                _logger.LogInformation("写入 roleplay 文件：{Path}", mainFilePath);
-
-                // 写入 code 目录（排除 limit.md）
-                if (!relativePath.Equals("limit.md", StringComparison.OrdinalIgnoreCase))
-                {
-                    var codeFilePath = Path.Combine(codeDir, relativePath);
-                    Directory.CreateDirectory(Path.GetDirectoryName(codeFilePath)!);
-                    await File.WriteAllTextAsync(codeFilePath, content, ct);
-                }
-            }
-        }
+        await WriteSkillPackAsync(mainDir, codeDir, files, isTemplate ? "template" : "roleplay", ct);
 
         // 7. 标记完成
         checkpoint.Metadata.Status = CheckpointStatus.Completed;
@@ -229,10 +196,7 @@ public class SkillsPipeline
             }
         }
 
-        var result = JsonSerializer.Deserialize<Dictionary<string, string>>(cleaned, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = false
-        });
+        var result = JsonSerializer.Deserialize<Dictionary<string, string>>(cleaned, JsonOptions);
 
         if (result == null || result.Count == 0)
         {
@@ -240,6 +204,32 @@ public class SkillsPipeline
         }
 
         return result;
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = false
+    };
+
+    private async Task WriteSkillPackAsync(string mainDir, string codeDir, Dictionary<string, string> files, string logPrefix, CancellationToken ct)
+    {
+        Directory.CreateDirectory(mainDir);
+        Directory.CreateDirectory(codeDir);
+
+        foreach (var (relativePath, content) in files)
+        {
+            var mainFilePath = Path.Combine(mainDir, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(mainFilePath)!);
+            await AtomicFileWriter.WriteAllTextAsync(mainFilePath, content, ct);
+            _logger.LogInformation("写入 {Prefix} 文件：{Path}", logPrefix, mainFilePath);
+
+            if (!relativePath.Equals("limit.md", StringComparison.OrdinalIgnoreCase))
+            {
+                var codeFilePath = Path.Combine(codeDir, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(codeFilePath)!);
+                await AtomicFileWriter.WriteAllTextAsync(codeFilePath, content, ct);
+            }
+        }
     }
 
     /// <summary>
@@ -314,13 +304,6 @@ public class SkillsPipeline
         }
 
         return sb.ToString();
-    }
-
-    private static string ComputeHash(string text)
-    {
-        var bytes = Encoding.UTF8.GetBytes(text);
-        var hash = SHA256.HashData(bytes);
-        return Convert.ToHexString(hash);
     }
 
     private static string Sanitize(string name)

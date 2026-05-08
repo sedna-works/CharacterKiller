@@ -92,14 +92,11 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
 
                 using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
-                // 流式模式下依靠数据持续传输保持连接，不设固定超时
-                requestCts.CancelAfter(TimeSpan.FromSeconds(_config.TimeoutSeconds));
-
                 _logger.LogDebug("LLM 请求体大小: ~{Size} chars", systemPrompt.Length + userPrompt.Length);
                 _logger.LogInformation("正在发送 LLM 请求... (尝试 {Attempt}/{MaxAttempts})", attempt, _config.MaxRetries);
 
                 var content = JsonContent.Create(request);
-                var httpRequest = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+                using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
 
                 var response = await _httpClient.SendAsync(
                     httpRequest,

@@ -229,6 +229,11 @@ static (CliConfig Config, IServiceProvider Provider) BuildConfigAndServices(Pars
         config.Llm.ApiKey = apiKey;
     }
 
+    for (int i = 0; i < config.Jobs.Count; i++)
+    {
+        ValidateJobConfig(config.Jobs[i], i);
+    }
+
     var services = new ServiceCollection();
     ServiceRegistrar.Register(services, config);
     var provider = services.BuildServiceProvider();
@@ -247,6 +252,25 @@ static TaskConfig MapJobToTask(JobConfig job)
         OutputMode = job.OutputMode,
         SkillsMaxContextChars = job.SkillsMaxContextChars
     };
+}
+
+static void ValidateJobConfig(JobConfig job, int index)
+{
+    if (job.InputFiles.Count == 0)
+    {
+        throw new ArgumentException($"Jobs[{index}]: InputFiles 不能为空");
+    }
+
+    if (string.IsNullOrWhiteSpace(job.CharacterName))
+    {
+        throw new ArgumentException($"Jobs[{index}]: CharacterName 不能为空");
+    }
+
+    if (!job.OutputMode.Equals("roleplay", StringComparison.OrdinalIgnoreCase)
+        && !job.OutputMode.Equals("template", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new ArgumentException($"Jobs[{index}]: OutputMode 必须是 'roleplay' 或 'template'，当前值: '{job.OutputMode}'");
+    }
 }
 
 static void ApplyTaskOverrides(CliConfig config, ParseResult parseResult, Option<string>? inputOption, Option<string>? characterOption, Option<string>? modeOption = null)

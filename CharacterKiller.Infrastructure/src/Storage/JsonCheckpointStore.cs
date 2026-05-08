@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using CharacterKiller.Core.Interfaces;
 using CharacterKiller.Core.Models;
+using CharacterKiller.Core.Services;
 
 namespace CharacterKiller.Infrastructure.Storage;
 
@@ -9,7 +10,7 @@ namespace CharacterKiller.Infrastructure.Storage;
 /// 基于 JSON 文件的 Checkpoint 存储实现。
 /// 大内容（切片结果）分离到独立文件，checkpoint JSON 仅保存元数据。
 /// </summary>
-public class JsonCheckpointStore : ICheckpointStore
+public class JsonCheckpointStore : ICheckpointStore, IDisposable
 {
     private readonly string _baseDir;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -17,6 +18,11 @@ public class JsonCheckpointStore : ICheckpointStore
     public JsonCheckpointStore(string baseDir)
     {
         _baseDir = Path.IsPathRooted(baseDir) ? baseDir : Path.Combine(Directory.GetCurrentDirectory(), baseDir);
+    }
+
+    public void Dispose()
+    {
+        _writeLock.Dispose();
     }
 
     public ICheckpointStore WithBaseDir(string baseDir)
@@ -35,7 +41,7 @@ public class JsonCheckpointStore : ICheckpointStore
         }
 
         var json = await File.ReadAllTextAsync(path, ct);
-        return JsonSerializer.Deserialize<CheckpointState<TState>>(json, GetJsonOptions());
+        return JsonSerializer.Deserialize<CheckpointState<TState>>(json, JsonOptions);
     }
 
     public async Task SaveAsync<TState>(CheckpointState<TState> state, CancellationToken ct = default)
@@ -47,13 +53,8 @@ public class JsonCheckpointStore : ICheckpointStore
             state.Metadata.UpdatedAt = DateTime.UtcNow;
 
             var path = GetCheckpointPath(state.Metadata.CheckpointId);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-
-            // 原子写入：先写 .tmp，再 move 覆盖
-            var tempPath = path + ".tmp";
-            var json = JsonSerializer.Serialize(state, GetJsonOptions());
-            await File.WriteAllTextAsync(tempPath, json, ct);
-            File.Move(tempPath, path, overwrite: true);
+            var json = JsonSerializer.Serialize(state, JsonOptions);
+            await AtomicFileWriter.WriteAllTextAsync(path, json, ct);
         }
         finally
         {
@@ -118,8 +119,7 @@ public class JsonCheckpointStore : ICheckpointStore
     public async Task SaveSliceResultAsync(string checkpointId, int index, string content, CancellationToken ct = default)
     {
         var path = GetSlicePath(checkpointId, index);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await File.WriteAllTextAsync(path, content, ct);
+        await AtomicFileWriter.WriteAllTextAsync(path, content, ct);
     }
 
     public async Task<string?> LoadSliceResultAsync(string checkpointId, int index, CancellationToken ct = default)
@@ -157,14 +157,11 @@ public class JsonCheckpointStore : ICheckpointStore
         return Path.Combine(GetTempDir(checkpointId), $"slice_{index}.md");
     }
 
-    private static JsonSerializerOptions GetJsonOptions()
+    private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        return new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            PropertyNameCaseInsensitive = true,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        };
-    }
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 }

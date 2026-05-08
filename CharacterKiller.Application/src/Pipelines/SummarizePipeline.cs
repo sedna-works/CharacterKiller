@@ -185,9 +185,9 @@ public class SummarizePipeline
                         {
                             checkpoint.Progress.FailedItems.Add(index);
                             checkpoint.Progress.PendingItems.Remove(index);
+                            checkpoint.Metadata.Status = CheckpointStatus.Failed;
                         }
 
-                        checkpoint.Metadata.Status = CheckpointStatus.Failed;
                         await checkpointStore.SaveAsync(checkpoint, innerCt);
                         throw;
                     }
@@ -217,7 +217,7 @@ public class SummarizePipeline
         Directory.CreateDirectory(outputDir);
         var outputPath = Path.Combine(outputDir, $"{Sanitize(taskConfig.CharacterName)}.md");
         var markdown = RenderSummaryMarkdown(taskConfig.CharacterName, segments, taskConfig.InputFiles.Count > 0 ? taskConfig.InputFiles : new List<string> { taskConfig.InputFile });
-        await File.WriteAllTextAsync(outputPath, markdown, ct);
+        await AtomicFileWriter.WriteAllTextAsync(outputPath, markdown, ct);
 
         // 8. 标记完成
         checkpoint.Metadata.Status = CheckpointStatus.Completed;
@@ -240,7 +240,11 @@ public class SummarizePipeline
         _logger.LogInformation("处理切片 {Index}/{Total}", index + 1, chunks.Count);
 
         var chunk = chunks[index];
-        var userPrompt = SummarizePromptBuilder.BuildUserPrompt(checkpoint.Metadata.InputParams["characterName"]?.ToString() ?? "", chunk.Content);
+        if (!checkpoint.Metadata.InputParams.TryGetValue("characterName", out var charNameObj) || charNameObj is not string charName)
+        {
+            throw new InvalidOperationException("Checkpoint 损坏：缺少 characterName 参数");
+        }
+        var userPrompt = SummarizePromptBuilder.BuildUserPrompt(charName, chunk.Content);
 
         try
         {
