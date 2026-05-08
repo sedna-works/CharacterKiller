@@ -21,6 +21,7 @@ public class SummarizePipeline
     private readonly IFileReader _fileReader;
     private readonly ILogger<SummarizePipeline> _logger;
     private readonly ExecutionConfig _executionConfig;
+    private readonly CheckpointConfig _checkpointConfig;
 
     public SummarizePipeline(
         ILlmClient llmClient,
@@ -28,7 +29,8 @@ public class SummarizePipeline
         ICheckpointStore checkpointStore,
         IFileReader fileReader,
         ILogger<SummarizePipeline> logger,
-        ExecutionConfig executionConfig)
+        ExecutionConfig executionConfig,
+        CheckpointConfig checkpointConfig)
     {
         _llmClient = llmClient;
         _estimator = estimator;
@@ -36,6 +38,7 @@ public class SummarizePipeline
         _fileReader = fileReader;
         _logger = logger;
         _executionConfig = executionConfig;
+        _checkpointConfig = checkpointConfig;
     }
 
     public async Task RunAsync(TaskConfig taskConfig, SlicingConfig slicingConfig, CancellationToken ct = default)
@@ -43,8 +46,8 @@ public class SummarizePipeline
         _logger.LogInformation("开始 Summarize 流程：角色={Character}，切片并发度={Concurrency}",
             taskConfig.CharacterName, _executionConfig.MaxChunkConcurrency);
 
-        // 使用任务输出目录下的 checkpoints 子目录
-        var checkpointDir = Path.Combine(taskConfig.OutputDirectory, "checkpoints");
+        // 使用任务输出目录下的 checkpoint 子目录
+        var checkpointDir = Path.Combine(taskConfig.OutputDirectory, _checkpointConfig.Directory);
         var checkpointStore = _baseCheckpointStore.WithBaseDir(checkpointDir);
 
         // 1. 读取文本（支持单文件或多文件合并）

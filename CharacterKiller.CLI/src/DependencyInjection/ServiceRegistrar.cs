@@ -40,7 +40,14 @@ public static class ServiceRegistrar
 
         // Checkpoint 存储
         // 基础实例以当前工作目录为基目录，实际 Pipeline 中通过 WithBaseDir 指定任务级子目录
-        services.AddSingleton<ICheckpointStore>(new JsonCheckpointStore(Directory.GetCurrentDirectory()));
+        if (config.Checkpoint.Enabled)
+        {
+            services.AddSingleton<ICheckpointStore>(new JsonCheckpointStore(Directory.GetCurrentDirectory()));
+        }
+        else
+        {
+            services.AddSingleton<ICheckpointStore, NullCheckpointStore>();
+        }
 
         // LLM 客户端（工厂模式创建）
         services.AddSingleton<ILlmClient>(sp =>

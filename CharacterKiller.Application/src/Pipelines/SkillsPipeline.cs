@@ -16,15 +16,18 @@ public class SkillsPipeline
     private readonly ILlmClient _llmClient;
     private readonly ICheckpointStore _baseCheckpointStore;
     private readonly ILogger<SkillsPipeline> _logger;
+    private readonly CheckpointConfig _checkpointConfig;
 
     public SkillsPipeline(
         ILlmClient llmClient,
         ICheckpointStore checkpointStore,
-        ILogger<SkillsPipeline> logger)
+        ILogger<SkillsPipeline> logger,
+        CheckpointConfig checkpointConfig)
     {
         _llmClient = llmClient;
         _baseCheckpointStore = checkpointStore;
         _logger = logger;
+        _checkpointConfig = checkpointConfig;
     }
 
     public async Task RunAsync(TaskConfig taskConfig, CancellationToken ct = default)
@@ -45,7 +48,7 @@ public class SkillsPipeline
         var checkpointId = $"skills_{Sanitize(taskConfig.CharacterName)}_{contentHash[..8]}";
 
         // 3. 加载或创建 Checkpoint
-        var checkpointDir = Path.Combine(taskConfig.OutputDirectory, "checkpoints");
+        var checkpointDir = Path.Combine(taskConfig.OutputDirectory, _checkpointConfig.Directory);
         var checkpointStore = _baseCheckpointStore.WithBaseDir(checkpointDir);
 
         var checkpoint = await checkpointStore.LoadAsync<SkillsTaskState>(checkpointId, ct);
