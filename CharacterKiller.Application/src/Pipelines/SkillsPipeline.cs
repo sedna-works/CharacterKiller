@@ -40,8 +40,8 @@ public class SkillsPipeline
 
         var summaryText = await File.ReadAllTextAsync(summaryPath, ct);
 
-        // 2. 计算 Checkpoint ID
-        var contentHash = ComputeHash(summaryPath + summaryText);
+        // 2. 计算 Checkpoint ID（包含 OutputMode，确保切换模式后重新生成）
+        var contentHash = ComputeHash(summaryPath + summaryText + taskConfig.OutputMode);
         var checkpointId = $"skills_{Sanitize(taskConfig.CharacterName)}_{contentHash[..8]}";
 
         // 3. 加载或创建 Checkpoint
