@@ -3,10 +3,4 @@ obj/
 .vs/
 .vscode/
 .idea/
-AutoPack.GUI/Properties/PublishProfiles
-AutoPack.GUI/publish
-
-AutoPack.Server/publish/
-AutoPack.Server/Properties/
-
 .DS_Store

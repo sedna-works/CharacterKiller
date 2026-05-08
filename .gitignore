@@ -1,0 +1,30 @@
+# Build outputs
+bin/
+obj/
+publish/
+out/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Checkpoints (runtime generated)
+checkpoints/
+
+# User-specific config files
+appsettings.Development.json
+appsettings.Local.json
+appsettings.*.local.json
+
+# NuGet
+*.nupkg
