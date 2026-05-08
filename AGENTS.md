@@ -1,6 +1,6 @@
 # CharacterKiller
 
-本项目是一个命令行工具，用于从 Galgame/视觉小说剧本文本中提炼角色信息，并生成可用于角色扮演（roleplay）的 skill 文件夹结构。
+本项目用于从文本中提炼角色信息生成相关角色的 SKILL。
 
 参考项目：[Github: GalgameCharacterSkills](https://github.com/JodieRuth/GalgameCharacterSkills)
 
@@ -106,6 +106,10 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
     "ChunkSizeTokens": 50000,
     "OverlapTokens": 500
   },
+  "Execution": {
+    "MaxChunkConcurrency": 1,
+    "MaxJobConcurrency": 1
+  },
   "Checkpoint": {
     "Enabled": true,
     "Directory": "checkpoints"
@@ -121,6 +125,9 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
   - `OutputDirectory`：任务输出目录，默认 `output`。
   - `OutputMode`：输出模式。`roleplay`（默认）生成 AI 角色扮演 skill 文件夹；`template` 生成去剧情化、可复用的小说人物模板。
 - `Jobs`：批量任务列表。若 `Jobs` 非空，则优先执行批量任务，忽略 `Task`。每个 Job 的字段与 `Task` 相同，但不包含 `InputFile`（统一使用 `InputFiles` 列表）。
+- `Execution`：执行并发度配置。
+  - `MaxChunkConcurrency`：Summarize 阶段单个角色的最大切片并发数。默认 `1`（顺序执行）。
+  - `MaxJobConcurrency`：批量任务（Jobs）的最大并行角色数。默认 `1`（顺序执行）。
 
 ### 环境变量
 
@@ -207,5 +214,6 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 
 - **新增 LLM Provider**：目前所有 provider（OpenAI、Kimi、DeepSeek、Ollama）均复用 `OpenAiCompatibleClient`。若需接入非 OpenAI 兼容接口，在 `LlmClientFactory` 中新增分支即可。
 - **更换 Token 估算器**：默认使用 `CharBasedEstimator`（字符近似）。可在 `ServiceRegistrar` 中替换为 `TiktokenEstimator`（需自行实现，Infrastructure 已引用 `Microsoft.ML.Tokenizers`）。
-- **新增 OutputMode**：在 `TaskConfig`/`JobConfig` 中设置 `OutputMode` 即可切换生成策略。`SkillsPipeline` 内部通过 `taskConfig.OutputMode` 分支选择 `RoleplayPromptBuilder` 或 `TemplatePromptBuilder`，并写入不同的输出目录结构。新增模式时，只需：1) 新增 `IPromptBuilder` 实现；2) 在 `SkillsPipeline` 中添加分支；3) 在 `TaskConfig`/`JobConfig` 中扩展枚举/字符串值。
+- **新增 OutputMode**：在 `TaskConfig`/`JobConfig` 中设置 `OutputMode` 即可切换生成策略。`SkillsPipeline` 内部通过 `taskConfig.OutputMode` 分支选择 `RoleplayPromptBuilder` 或 `TemplatePromptBuilder`，并写入不同的输出目录结构。新增模式时，只需：1) 新增 PromptBuilder 实现；2) 在 `SkillsPipeline` 中添加分支；3) 在 `TaskConfig`/`JobConfig` 中扩展枚举/字符串值。
+- **并行执行**：通过 `ExecutionConfig`（`MaxChunkConcurrency`、`MaxJobConcurrency`）和 `LlmConfig.MaxConcurrency` 三层控制并发。`SummarizePipeline` 内部使用 `Parallel.ForEachAsync` 实现切片级并行，`Program.cs` 使用 `Parallel.ForEachAsync` 实现 Job 级并行，`OpenAiCompatibleClient` 使用 `SemaphoreSlim` 限制总 HTTP 并发数。三层独立配置，可灵活组合。
 - **新增 Pipeline**：参考 `SummarizePipeline` / `SkillsPipeline`，利用 `ICheckpointStore` 的泛型接口实现新任务的断点续传。

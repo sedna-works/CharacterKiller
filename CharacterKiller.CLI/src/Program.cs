@@ -64,13 +64,17 @@ summarizeCommand.SetAction(async (parseResult, cancellationToken) =>
 
     if (config.Jobs.Count > 0)
     {
-        logger.LogInformation("检测到批量任务，共 {Count} 个角色", config.Jobs.Count);
+        logger.LogInformation("检测到批量任务，共 {Count} 个角色，并发度={Concurrency}", config.Jobs.Count, config.Execution.MaxJobConcurrency);
         var pipeline = provider.GetRequiredService<SummarizePipeline>();
-        foreach (var taskConfig in config.Jobs.Select(MapJobToTask))
-        {
-            logger.LogInformation("批量 Summarize：角色={Character}，文件数={FileCount}", taskConfig.CharacterName, taskConfig.InputFiles.Count);
-            await pipeline.RunAsync(taskConfig, config.Slicing, cancellationToken);
-        }
+        await RunJobsAsync(
+            config.Jobs.Select(MapJobToTask),
+            config.Execution.MaxJobConcurrency,
+            async (taskConfig, ct) =>
+            {
+                logger.LogInformation("批量 Summarize：角色={Character}，文件数={FileCount}", taskConfig.CharacterName, taskConfig.InputFiles.Count);
+                await pipeline.RunAsync(taskConfig, config.Slicing, ct);
+            },
+            cancellationToken);
     }
     else
     {
@@ -92,13 +96,17 @@ skillsCommand.SetAction(async (parseResult, cancellationToken) =>
 
     if (config.Jobs.Count > 0)
     {
-        logger.LogInformation("检测到批量任务，共 {Count} 个角色", config.Jobs.Count);
+        logger.LogInformation("检测到批量任务，共 {Count} 个角色，并发度={Concurrency}", config.Jobs.Count, config.Execution.MaxJobConcurrency);
         var pipeline = provider.GetRequiredService<SkillsPipeline>();
-        foreach (var taskConfig in config.Jobs.Select(MapJobToTask))
-        {
-            logger.LogInformation("批量 Skills：角色={Character}", taskConfig.CharacterName);
-            await pipeline.RunAsync(taskConfig, cancellationToken);
-        }
+        await RunJobsAsync(
+            config.Jobs.Select(MapJobToTask),
+            config.Execution.MaxJobConcurrency,
+            async (taskConfig, ct) =>
+            {
+                logger.LogInformation("批量 Skills：角色={Character}", taskConfig.CharacterName);
+                await pipeline.RunAsync(taskConfig, ct);
+            },
+            cancellationToken);
     }
     else
     {
@@ -120,16 +128,20 @@ runCommand.SetAction(async (parseResult, cancellationToken) =>
 
     if (config.Jobs.Count > 0)
     {
-        logger.LogInformation("检测到批量任务，共 {Count} 个角色", config.Jobs.Count);
+        logger.LogInformation("检测到批量任务，共 {Count} 个角色，并发度={Concurrency}", config.Jobs.Count, config.Execution.MaxJobConcurrency);
         var summarizePipeline = provider.GetRequiredService<SummarizePipeline>();
         var skillsPipeline = provider.GetRequiredService<SkillsPipeline>();
 
-        foreach (var taskConfig in config.Jobs.Select(MapJobToTask))
-        {
-            logger.LogInformation("批量 Run：角色={Character}，文件数={FileCount}", taskConfig.CharacterName, taskConfig.InputFiles.Count);
-            await summarizePipeline.RunAsync(taskConfig, config.Slicing, cancellationToken);
-            await skillsPipeline.RunAsync(taskConfig, cancellationToken);
-        }
+        await RunJobsAsync(
+            config.Jobs.Select(MapJobToTask),
+            config.Execution.MaxJobConcurrency,
+            async (taskConfig, ct) =>
+            {
+                logger.LogInformation("批量 Run：角色={Character}，文件数={FileCount}", taskConfig.CharacterName, taskConfig.InputFiles.Count);
+                await summarizePipeline.RunAsync(taskConfig, config.Slicing, ct);
+                await skillsPipeline.RunAsync(taskConfig, ct);
+            },
+            cancellationToken);
     }
     else
     {
@@ -156,16 +168,20 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
 
     if (config.Jobs.Count > 0)
     {
-        logger.LogInformation("检测到批量任务，共 {Count} 个角色", config.Jobs.Count);
+        logger.LogInformation("检测到批量任务，共 {Count} 个角色，并发度={Concurrency}", config.Jobs.Count, config.Execution.MaxJobConcurrency);
         var summarizePipeline = provider.GetRequiredService<SummarizePipeline>();
         var skillsPipeline = provider.GetRequiredService<SkillsPipeline>();
 
-        foreach (var taskConfig in config.Jobs.Select(MapJobToTask))
-        {
-            logger.LogInformation("批量 Run：角色={Character}，文件数={FileCount}", taskConfig.CharacterName, taskConfig.InputFiles.Count);
-            await summarizePipeline.RunAsync(taskConfig, config.Slicing, cancellationToken);
-            await skillsPipeline.RunAsync(taskConfig, cancellationToken);
-        }
+        await RunJobsAsync(
+            config.Jobs.Select(MapJobToTask),
+            config.Execution.MaxJobConcurrency,
+            async (taskConfig, ct) =>
+            {
+                logger.LogInformation("批量 Run：角色={Character}，文件数={FileCount}", taskConfig.CharacterName, taskConfig.InputFiles.Count);
+                await summarizePipeline.RunAsync(taskConfig, config.Slicing, ct);
+                await skillsPipeline.RunAsync(taskConfig, ct);
+            },
+            cancellationToken);
     }
     else
     {
@@ -274,5 +290,33 @@ static void ValidateTaskConfig(TaskConfig task, bool requireInput)
     {
         Console.Error.WriteLine("错误：未指定角色名称。请使用 --character 或 -n 参数指定，或在配置文件中设置 Jobs/CharacterName。");
         Environment.Exit(1);
+    }
+}
+
+static async Task RunJobsAsync(
+    IEnumerable<TaskConfig> jobs,
+    int maxConcurrency,
+    Func<TaskConfig, CancellationToken, Task> executeAsync,
+    CancellationToken ct)
+{
+    if (maxConcurrency <= 1)
+    {
+        foreach (var job in jobs)
+        {
+            await executeAsync(job, ct);
+        }
+    }
+    else
+    {
+        var options = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = maxConcurrency,
+            CancellationToken = ct
+        };
+
+        await Parallel.ForEachAsync(jobs, options, async (job, innerCt) =>
+        {
+            await executeAsync(job, innerCt);
+        });
     }
 }

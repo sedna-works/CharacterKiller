@@ -23,4 +23,6 @@ public class CliConfig
     public SlicingConfig Slicing { get; set; } = new();
 
     public CheckpointConfig Checkpoint { get; set; } = new();
+
+    public ExecutionConfig Execution { get; set; } = new();
 }

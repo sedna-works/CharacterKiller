@@ -16,4 +16,10 @@ public class LlmConfig
     public int MaxRetries { get; set; } = 3;
 
     public int TimeoutSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// 同时向 LLM API 发出的最大并发请求数。
+    /// 设为 1 表示顺序请求（默认）。
+    /// </summary>
+    public int MaxConcurrency { get; set; } = 1;
 }

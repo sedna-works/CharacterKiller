@@ -11,6 +11,7 @@ namespace CharacterKiller.Application.Pipelines;
 
 /// <summary>
 /// Summarize 流程编排器：文本切片 → 逐段归纳 → 汇总保存。
+/// 支持切片级并发执行，通过 <see cref="ExecutionConfig.MaxChunkConcurrency"/> 控制。
 /// </summary>
 public class SummarizePipeline
 {
@@ -19,24 +20,28 @@ public class SummarizePipeline
     private readonly ICheckpointStore _baseCheckpointStore;
     private readonly IFileReader _fileReader;
     private readonly ILogger<SummarizePipeline> _logger;
+    private readonly ExecutionConfig _executionConfig;
 
     public SummarizePipeline(
         ILlmClient llmClient,
         ITokenEstimator estimator,
         ICheckpointStore checkpointStore,
         IFileReader fileReader,
-        ILogger<SummarizePipeline> logger)
+        ILogger<SummarizePipeline> logger,
+        ExecutionConfig executionConfig)
     {
         _llmClient = llmClient;
         _estimator = estimator;
         _baseCheckpointStore = checkpointStore;
         _fileReader = fileReader;
         _logger = logger;
+        _executionConfig = executionConfig;
     }
 
     public async Task RunAsync(TaskConfig taskConfig, SlicingConfig slicingConfig, CancellationToken ct = default)
     {
-        _logger.LogInformation("开始 Summarize 流程：角色={Character}", taskConfig.CharacterName);
+        _logger.LogInformation("开始 Summarize 流程：角色={Character}，切片并发度={Concurrency}",
+            taskConfig.CharacterName, _executionConfig.MaxChunkConcurrency);
 
         // 使用任务输出目录下的 checkpoints 子目录
         var checkpointDir = Path.Combine(taskConfig.OutputDirectory, "checkpoints");
@@ -123,35 +128,72 @@ public class SummarizePipeline
         var systemPrompt = SummarizePromptBuilder.BuildSystemPrompt();
         var pending = checkpoint.Progress.PendingItems.ToList(); // 复制避免遍历时修改
 
-        foreach (var index in pending)
+        if (_executionConfig.MaxChunkConcurrency <= 1)
         {
-            _logger.LogInformation("处理切片 {Index}/{Total}", index + 1, chunks.Count);
-
-            var chunk = chunks[index];
-            var userPrompt = SummarizePromptBuilder.BuildUserPrompt(taskConfig.CharacterName, chunk.Content);
+            // 顺序执行（默认，向后兼容）
+            foreach (var index in pending)
+            {
+                await ProcessChunkAsync(index, chunks, systemPrompt, checkpoint, checkpointId, checkpointStore, ct);
+            }
+        }
+        else
+        {
+            // 并发执行
+            var progressLock = new object();
+            var options = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = _executionConfig.MaxChunkConcurrency,
+                CancellationToken = ct
+            };
 
             try
             {
-                var result = await _llmClient.CompleteAsync(systemPrompt, userPrompt, ct);
+                await Parallel.ForEachAsync(pending, options, async (index, innerCt) =>
+                {
+                    _logger.LogInformation("处理切片 {Index}/{Total}", index + 1, chunks.Count);
 
-                // 保存切片结果到独立文件（大内容分离）
-                await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, ct);
-                checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.txt";
-                checkpoint.Progress.CompletedItems.Add(index);
-                checkpoint.Progress.PendingItems.Remove(index);
-                checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
+                    var chunk = chunks[index];
+                    var userPrompt = SummarizePromptBuilder.BuildUserPrompt(taskConfig.CharacterName, chunk.Content);
 
-                await checkpointStore.SaveAsync(checkpoint, ct);
-                _logger.LogInformation("切片 {Index} 完成", index + 1);
+                    try
+                    {
+                        var result = await _llmClient.CompleteAsync(systemPrompt, userPrompt, innerCt);
+
+                        // 保存切片结果到独立文件（大内容分离）
+                        await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, innerCt);
+
+                        lock (progressLock)
+                        {
+                            checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.txt";
+                            checkpoint.Progress.CompletedItems.Add(index);
+                            checkpoint.Progress.PendingItems.Remove(index);
+                            checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
+                        }
+
+                        await checkpointStore.SaveAsync(checkpoint, innerCt);
+                        _logger.LogInformation("切片 {Index} 完成", index + 1);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "切片 {Index} 处理失败", index + 1);
+
+                        lock (progressLock)
+                        {
+                            checkpoint.Progress.FailedItems.Add(index);
+                            checkpoint.Progress.PendingItems.Remove(index);
+                        }
+
+                        checkpoint.Metadata.Status = CheckpointStatus.Failed;
+                        await checkpointStore.SaveAsync(checkpoint, innerCt);
+                        throw;
+                    }
+                });
             }
-            catch (Exception ex)
+            catch (AggregateException aex)
             {
-                _logger.LogError(ex, "切片 {Index} 处理失败", index + 1);
-                checkpoint.Progress.FailedItems.Add(index);
-                checkpoint.Progress.PendingItems.Remove(index);
-                checkpoint.Metadata.Status = CheckpointStatus.Failed;
-                await checkpointStore.SaveAsync(checkpoint, ct);
-                throw;
+                // Parallel.ForEachAsync 会将异常包装为 AggregateException
+                // 提取第一个内部异常重新抛出，保持日志简洁
+                throw aex.InnerExceptions.FirstOrDefault() ?? aex;
             }
         }
 
@@ -180,6 +222,45 @@ public class SummarizePipeline
         await checkpointStore.SaveAsync(checkpoint, ct);
 
         _logger.LogInformation("Summarize 完成，输出：{Path}", outputPath);
+    }
+
+    private async Task ProcessChunkAsync(
+        int index,
+        List<TextChunk> chunks,
+        string systemPrompt,
+        CheckpointState<SummarizeTaskState> checkpoint,
+        string checkpointId,
+        ICheckpointStore checkpointStore,
+        CancellationToken ct)
+    {
+        _logger.LogInformation("处理切片 {Index}/{Total}", index + 1, chunks.Count);
+
+        var chunk = chunks[index];
+        var userPrompt = SummarizePromptBuilder.BuildUserPrompt(checkpoint.Metadata.InputParams["characterName"]?.ToString() ?? "", chunk.Content);
+
+        try
+        {
+            var result = await _llmClient.CompleteAsync(systemPrompt, userPrompt, ct);
+
+            // 保存切片结果到独立文件（大内容分离）
+            await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, ct);
+            checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.txt";
+            checkpoint.Progress.CompletedItems.Add(index);
+            checkpoint.Progress.PendingItems.Remove(index);
+            checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
+
+            await checkpointStore.SaveAsync(checkpoint, ct);
+            _logger.LogInformation("切片 {Index} 完成", index + 1);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "切片 {Index} 处理失败", index + 1);
+            checkpoint.Progress.FailedItems.Add(index);
+            checkpoint.Progress.PendingItems.Remove(index);
+            checkpoint.Metadata.Status = CheckpointStatus.Failed;
+            await checkpointStore.SaveAsync(checkpoint, ct);
+            throw;
+        }
     }
 
     /// <summary>

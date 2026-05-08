@@ -23,6 +23,7 @@ public static class ServiceRegistrar
         services.AddSingleton(config.Task);
         services.AddSingleton(config.Slicing);
         services.AddSingleton(config.Checkpoint);
+        services.AddSingleton(config.Execution);
 
         // 日志
         services.AddLogging(builder =>
@@ -38,10 +39,8 @@ public static class ServiceRegistrar
         services.AddSingleton<IFileReader, LocalFileReader>();
 
         // Checkpoint 存储
-        var checkpointDir = Path.IsPathRooted(config.Checkpoint.Directory)
-            ? config.Checkpoint.Directory
-            : Path.Combine(Directory.GetCurrentDirectory(), config.Checkpoint.Directory);
-        services.AddSingleton<ICheckpointStore>(new JsonCheckpointStore(checkpointDir));
+        // 基础实例以当前工作目录为基目录，实际 Pipeline 中通过 WithBaseDir 指定任务级子目录
+        services.AddSingleton<ICheckpointStore>(new JsonCheckpointStore(Directory.GetCurrentDirectory()));
 
         // LLM 客户端（工厂模式创建）
         services.AddSingleton<ILlmClient>(sp =>

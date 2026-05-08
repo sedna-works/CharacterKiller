@@ -17,12 +17,11 @@ public class JsonCheckpointStore : ICheckpointStore
     public JsonCheckpointStore(string baseDir)
     {
         _baseDir = Path.IsPathRooted(baseDir) ? baseDir : Path.Combine(Directory.GetCurrentDirectory(), baseDir);
-        Directory.CreateDirectory(_baseDir);
     }
 
     public ICheckpointStore WithBaseDir(string baseDir)
     {
-        var resolvedPath = Path.IsPathRooted(baseDir) ? baseDir : Path.Combine(Directory.GetCurrentDirectory(), baseDir);
+        var resolvedPath = Path.IsPathRooted(baseDir) ? baseDir : Path.Combine(_baseDir, baseDir);
         return new JsonCheckpointStore(resolvedPath);
     }
 

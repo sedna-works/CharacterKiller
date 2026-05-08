@@ -102,6 +102,10 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
     "ChunkSizeTokens": 50000,
     "OverlapTokens": 500
   },
+  "Execution": {
+    "MaxChunkConcurrency": 1,
+    "MaxJobConcurrency": 1
+  },
   "Checkpoint": {
     "Enabled": true,
     "Directory": "checkpoints"
@@ -235,6 +239,29 @@ Template 模式的核心处理：
 | `-n, --character <name>` | 指定角色名（覆盖 `Task.CharacterName`） |
 | `-m, --mode <mode>` | 输出模式：`roleplay` 或 `template`（覆盖 `Task.OutputMode`） |
 
+### 并发配置
+
+通过 `Execution` 配置项开启并行执行，可显著缩短批量任务或多切片的处理时间：
+
+```json
+{
+  "Execution": {
+    "MaxChunkConcurrency": 5,
+    "MaxJobConcurrency": 3
+  }
+}
+```
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `MaxChunkConcurrency` | Summarize 阶段单个角色的最大切片并发数。设为 1 表示顺序处理（默认）。 | `1` |
+| `MaxJobConcurrency` | 批量任务（Jobs）的最大并行角色数。设为 1 表示顺序处理（默认）。 | `1` |
+
+**并发安全说明**：
+- 每个切片是独立的 LLM 调用，彼此之间**没有上下文依赖**，并行不会影响归纳质量。
+- `ILlmClient` 内部已根据 `Llm.MaxConcurrency` 限制同时发出的 HTTP 请求数，避免触发 LLM Provider 的 Rate Limit。
+- 建议根据你的 API 账户并发限额调整（如 OpenAI 免费档通常限制 2-3 并发）。
+
 ---
 
 ## 注意事项
@@ -242,6 +269,7 @@ Template 模式的核心处理：
 - **API Key**：通过配置文件或 `GCS_APIKEY` 环境变量传入，切勿硬编码到源码中。
 - **LLM JSON 输出**：Skills 阶段依赖 LLM 返回合法 JSON。若解析失败，程序会抛出异常并记录原始响应的前 2000 个字符以便排查。
 - **Token 估算**：默认使用字符近似估算器（`CharBasedEstimator`）。如需更精确的 `cl100k_base` Tiktoken 估算，可自行在 `ServiceRegistrar` 中替换实现（项目已引用 `Microsoft.ML.Tokenizers`）。
+- **并发执行**：开启 `Execution.MaxChunkConcurrency` 或 `MaxJobConcurrency` 后，不同角色/切片会并行调用 LLM。建议配合 `Llm.MaxConcurrency` 限制总 HTTP 并发数，避免触发 Rate Limit。
 - **文件路径**：输出文件名会对角色名进行清理（移除非法字符），但输入文件路径未做深度校验，请确保传入可信路径。
 
 ---

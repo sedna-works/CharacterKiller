@@ -16,6 +16,7 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
     private readonly HttpClient _httpClient;
     private readonly LlmConfig _config;
     private readonly ILogger<OpenAiCompatibleClient> _logger;
+    private readonly SemaphoreSlim _concurrencyLimit;
 
     public OpenAiCompatibleClient(LlmConfig config, ILogger<OpenAiCompatibleClient> logger)
     {
@@ -26,6 +27,9 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
             Timeout = TimeSpan.FromSeconds(config.TimeoutSeconds)
         };
 
+        var concurrency = Math.Max(1, config.MaxConcurrency);
+        _concurrencyLimit = new SemaphoreSlim(concurrency, concurrency);
+
         if (!string.IsNullOrEmpty(config.ApiKey))
         {
             _httpClient.DefaultRequestHeaders.Authorization =
@@ -34,6 +38,19 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
     }
 
     public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken ct = default)
+    {
+        await _concurrencyLimit.WaitAsync(ct);
+        try
+        {
+            return await CompleteInternalAsync(systemPrompt, userPrompt, ct);
+        }
+        finally
+        {
+            _concurrencyLimit.Release();
+        }
+    }
+
+    private async Task<string> CompleteInternalAsync(string systemPrompt, string userPrompt, CancellationToken ct)
     {
         var request = new ChatCompletionRequest
         {
@@ -89,6 +106,7 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
 
     public void Dispose()
     {
+        _concurrencyLimit.Dispose();
         _httpClient.Dispose();
         GC.SuppressFinalize(this);
     }
