@@ -18,10 +18,24 @@ public class CharBasedEstimator : ITokenEstimator
         var chineseChars = 0;
         var englishWords = 0;
         var inEnglishWord = false;
+        var skipLowSurrogate = false;
 
         foreach (var c in text)
         {
-            if (char.IsHighSurrogate(c)) continue; // 跳过代理对前半部分，由下一个字符统一处理
+            if (skipLowSurrogate)
+            {
+                skipLowSurrogate = false;
+                continue;
+            }
+
+            if (char.IsHighSurrogate(c))
+            {
+                // 代理对（Emoji 等）：跳过下一个低代理对，整体计为 1 个 token
+                skipLowSurrogate = true;
+                chineseChars++;
+                inEnglishWord = false;
+                continue;
+            }
 
             if (c > 127)
             {

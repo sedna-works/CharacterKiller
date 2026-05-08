@@ -123,7 +123,7 @@ public class SummarizePipeline
             }
 
             // 5. Sanitize：验证 completed_items 对应的切片文件是否真实存在
-            await SanitizeCheckpointAsync(checkpoint, checkpointId, checkpointStore, ct);
+            await ValidateCheckpointAsync(checkpoint, checkpointId, checkpointStore, ct);
         }
 
         // 6. 执行 pending 切片
@@ -277,7 +277,7 @@ public class SummarizePipeline
     /// 恢复时校验：检查 CompletedItems 对应的切片文件是否真实存在且有内容。
     /// 若文件缺失，将索引移回 PendingItems。
     /// </summary>
-    private async Task SanitizeCheckpointAsync(
+    private async Task ValidateCheckpointAsync(
         CheckpointState<SummarizeTaskState> checkpoint,
         string checkpointId,
         ICheckpointStore checkpointStore,

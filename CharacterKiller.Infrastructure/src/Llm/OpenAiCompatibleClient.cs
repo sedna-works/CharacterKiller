@@ -103,7 +103,7 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
                     throw new HttpRequestException($"LLM API 错误: {(int)response.StatusCode} - {errorBody}");
                 }
 
-                var fullContent = await ReadStreamAsync(response, requestCts.Token);
+                var fullContent = await ReadStreamAsync(response, _logger, requestCts.Token);
                 Console.WriteLine();
                 Console.Out.Flush();
 
@@ -123,7 +123,7 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
     /// <summary>
     /// 读取 SSE 流式响应，实时输出到控制台。
     /// </summary>
-    private static async Task<string> ReadStreamAsync(HttpResponseMessage response, CancellationToken ct)
+    private static async Task<string> ReadStreamAsync(HttpResponseMessage response, ILogger logger, CancellationToken ct)
     {
         var sb = new StringBuilder();
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -176,9 +176,10 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
                     Console.Write(delta);
                 }
             }
-            catch (JsonException)
+            catch (JsonException ex)
             {
-                // 跳过无法解析的行（如空数据或格式异常）
+                // 跳过无法解析的行（如空数据或格式异常），但记录以便排查
+                logger.LogDebug("SSE 流中跳过无法解析的行: {Line}, 原因: {Reason}", data, ex.Message);
             }
         }
 

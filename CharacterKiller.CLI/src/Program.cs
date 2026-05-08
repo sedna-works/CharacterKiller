@@ -221,7 +221,18 @@ static (CliConfig Config, IServiceProvider Provider) BuildConfigAndServices(Pars
         .AddEnvironmentVariables(prefix: "GCS_")
         .Build();
 
-    var config = configuration.Get<CliConfig>() ?? new CliConfig();
+    CliConfig config;
+    try
+    {
+        config = configuration.Get<CliConfig>() ?? new CliConfig();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"配置文件解析失败：{configPath}");
+        Console.Error.WriteLine($"错误详情：{ex.Message}");
+        Environment.Exit(1);
+        throw;
+    }
 
     var apiKey = Environment.GetEnvironmentVariable("GCS_APIKEY");
     if (!string.IsNullOrEmpty(apiKey))

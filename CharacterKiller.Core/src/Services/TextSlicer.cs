@@ -1,3 +1,4 @@
+using System.Text;
 using CharacterKiller.Core.Interfaces;
 using CharacterKiller.Core.Models;
 
@@ -26,8 +27,9 @@ public class TextSlicer
             return new List<TextChunk>();
         }
 
-        // 按段落拆分（保留换行语义）
-        var paragraphs = text.Split(new[] { "\r\n\r\n", "\n\n" }, StringSplitOptions.RemoveEmptyEntries);
+        // 统一换行符后按段落拆分（兼容 \r\n, \n, \r）
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var paragraphs = normalized.Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries);
         var chunks = new List<TextChunk>();
         var currentParagraphs = new List<string>();
         var currentTokens = 0;
@@ -130,28 +132,48 @@ public class TextSlicer
 
     private List<string> SplitBySentences(string paragraph, int chunkSizeTokens)
     {
-        // 按句号、问号、感叹号切分
-        var sentences = paragraph.Split(new[] { '。', '？', '！', '.', '?', '!' }, StringSplitOptions.RemoveEmptyEntries);
+        var delimiters = new HashSet<char>(new[] { '。', '？', '！', '.', '?', '!' });
         var result = new List<string>();
-        var current = new List<string>();
+        var currentSentences = new List<string>();
         var tokens = 0;
+        var sb = new StringBuilder();
 
-        foreach (var s in sentences)
+        foreach (var c in paragraph)
         {
-            var st = _estimator.Estimate(s);
-            if (tokens + st > chunkSizeTokens && current.Count > 0)
+            sb.Append(c);
+            if (delimiters.Contains(c))
             {
-                result.Add(string.Join("", current));
-                current.Clear();
-                tokens = 0;
+                var sentence = sb.ToString();
+                var st = _estimator.Estimate(sentence);
+                if (tokens + st > chunkSizeTokens && currentSentences.Count > 0)
+                {
+                    result.Add(string.Join("", currentSentences));
+                    currentSentences.Clear();
+                    tokens = 0;
+                }
+                currentSentences.Add(sentence);
+                tokens += st;
+                sb.Clear();
             }
-            current.Add(s + "。");
-            tokens += st;
         }
 
-        if (current.Count > 0)
+        // 处理末尾没有标点的残留内容
+        if (sb.Length > 0)
         {
-            result.Add(string.Join("", current));
+            var remainder = sb.ToString();
+            var st = _estimator.Estimate(remainder);
+            if (tokens + st > chunkSizeTokens && currentSentences.Count > 0)
+            {
+                result.Add(string.Join("", currentSentences));
+                currentSentences.Clear();
+                tokens = 0;
+            }
+            currentSentences.Add(remainder);
+        }
+
+        if (currentSentences.Count > 0)
+        {
+            result.Add(string.Join("", currentSentences));
         }
 
         return result;

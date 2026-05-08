@@ -107,9 +107,10 @@ public class JsonCheckpointStore : ICheckpointStore, IDisposable
                     UpdatedAt = meta.TryGetProperty("UpdatedAt", out var ua) ? ua.GetDateTime() : DateTime.MinValue
                 });
             }
-            catch
+            catch (Exception ex)
             {
-                // 跳过损坏的文件
+                // 跳过损坏的文件，但记录日志以便排查
+                System.Diagnostics.Debug.WriteLine($"跳过损坏的 checkpoint 文件：{file}，原因：{ex.Message}");
             }
         }
 
