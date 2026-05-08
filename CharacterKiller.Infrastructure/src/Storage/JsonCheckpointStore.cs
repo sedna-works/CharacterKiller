@@ -154,7 +154,7 @@ public class JsonCheckpointStore : ICheckpointStore
 
     private string GetSlicePath(string checkpointId, int index)
     {
-        return Path.Combine(GetTempDir(checkpointId), $"slice_{index}.txt");
+        return Path.Combine(GetTempDir(checkpointId), $"slice_{index}.md");
     }
 
     private static JsonSerializerOptions GetJsonOptions()

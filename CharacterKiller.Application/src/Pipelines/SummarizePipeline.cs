@@ -164,7 +164,7 @@ public class SummarizePipeline
 
                         lock (progressLock)
                         {
-                            checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.txt";
+                            checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.md";
                             checkpoint.Progress.CompletedItems.Add(index);
                             checkpoint.Progress.PendingItems.Remove(index);
                             checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
@@ -244,7 +244,7 @@ public class SummarizePipeline
 
             // 保存切片结果到独立文件（大内容分离）
             await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, ct);
-            checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.txt";
+            checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.md";
             checkpoint.Progress.CompletedItems.Add(index);
             checkpoint.Progress.PendingItems.Remove(index);
             checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
