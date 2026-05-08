@@ -116,6 +116,8 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
                 }
 
                 var fullContent = await ReadStreamAsync(response, requestCts.Token);
+                Console.WriteLine();
+                Console.Out.Flush();
 
                 if (string.IsNullOrWhiteSpace(fullContent))
                 {

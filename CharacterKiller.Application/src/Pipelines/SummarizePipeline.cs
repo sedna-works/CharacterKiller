@@ -162,7 +162,6 @@ public class SummarizePipeline
                         Console.WriteLine($"[Summarize 切片 {index + 1}] 开始流式生成...");
 
                         var result = await _llmClient.CompleteAsync(systemPrompt, userPrompt, innerCt);
-                        Console.WriteLine();
 
                         // 保存切片结果到独立文件（大内容分离）
                         await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, innerCt);
@@ -248,7 +247,6 @@ public class SummarizePipeline
             Console.WriteLine($"[Summarize 切片 {index + 1}] 开始流式生成...");
 
             var result = await _llmClient.CompleteAsync(systemPrompt, userPrompt, ct);
-            Console.WriteLine();
 
             // 保存切片结果到独立文件（大内容分离）
             await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, ct);

@@ -117,7 +117,6 @@ public class SkillsPipeline
             Console.WriteLine("[Skills] 开始流式生成...");
 
             response = await _llmClient.CompleteAsync(systemPrompt, userPrompt, ct);
-            Console.WriteLine();
         }
         catch (Exception ex)
         {
@@ -289,7 +288,6 @@ public class SkillsPipeline
             Console.WriteLine($"[Summary 压缩] 第 {i + 1}/{chunks.Count} 段开始流式生成...");
 
             var part = await _llmClient.CompleteAsync(systemPrompt, userPrompt, ct);
-            Console.WriteLine();
             compressedParts.Add(part);
         }
 
