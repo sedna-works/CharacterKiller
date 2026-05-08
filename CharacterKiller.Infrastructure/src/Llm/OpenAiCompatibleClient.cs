@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CharacterKiller.Core.Interfaces;
@@ -10,6 +11,7 @@ namespace CharacterKiller.Infrastructure.Llm;
 /// <summary>
 /// 兼容 OpenAI API 格式的 LLM 客户端。
 /// 适用于 OpenAI、Kimi、DeepSeek、Ollama（OpenAI 兼容模式）等。
+/// 支持流式输出（SSE），可通过 <see cref="IProgress{T}"/> 实时接收生成内容。
 /// </summary>
 public class OpenAiCompatibleClient : ILlmClient, IDisposable
 {
@@ -22,7 +24,18 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
     {
         _config = config;
         _logger = logger;
-        _httpClient = new HttpClient
+
+        var handler = new SocketsHttpHandler
+        {
+            // 避免 504 后复用死连接导致无限挂起
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            // 连接建立超时（DNS + TCP 握手）
+            ConnectTimeout = TimeSpan.FromSeconds(30),
+            // 允许自动解压
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+        };
+
+        _httpClient = new HttpClient(handler)
         {
             Timeout = TimeSpan.FromSeconds(config.TimeoutSeconds)
         };
@@ -55,6 +68,7 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
         var request = new ChatCompletionRequest
         {
             Model = _config.Model,
+            Stream = true,
             Messages =
             [
                 new Message { Role = "system", Content = systemPrompt },
@@ -76,32 +90,154 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
                     await Task.Delay(delay, ct);
                 }
 
-                var response = await _httpClient.PostAsJsonAsync(url, request, ct);
-                var responseJson = await response.Content.ReadAsStringAsync(ct);
+                using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+                // 流式模式下依靠数据持续传输保持连接，不设固定超时
+                requestCts.CancelAfter(TimeSpan.FromSeconds(_config.TimeoutSeconds));
+
+                _logger.LogDebug("LLM 请求体大小: ~{Size} chars", systemPrompt.Length + userPrompt.Length);
+                _logger.LogInformation("正在发送 LLM 请求... (尝试 {Attempt}/{MaxAttempts})", attempt, _config.MaxRetries);
+
+                var content = JsonContent.Create(request);
+                var httpRequest = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+
+                var response = await _httpClient.SendAsync(
+                    httpRequest,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    requestCts.Token);
+
+                _logger.LogInformation("LLM 已响应，状态码: {StatusCode}", response.StatusCode);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogError("LLM API 返回错误: {StatusCode} - {Body}", response.StatusCode, responseJson);
-                    throw new HttpRequestException($"LLM API 错误: {(int)response.StatusCode} - {responseJson}");
+                    var errorBody = await response.Content.ReadAsStringAsync(ct);
+                    _logger.LogError("LLM API 返回错误: {StatusCode} - {Body}", response.StatusCode, errorBody);
+                    throw new HttpRequestException($"LLM API 错误: {(int)response.StatusCode} - {errorBody}");
                 }
 
-                var result = JsonSerializer.Deserialize<ChatCompletionResponse>(responseJson);
-                var content = result?.Choices?.FirstOrDefault()?.Message?.Content;
+                var fullContent = await ReadStreamAsync(response, requestCts.Token);
 
-                if (string.IsNullOrWhiteSpace(content))
+                if (string.IsNullOrWhiteSpace(fullContent))
                 {
                     throw new InvalidOperationException("LLM 返回空内容");
                 }
 
-                return content;
+                _logger.LogInformation("LLM 请求成功 (尝试 {Attempt})", attempt);
+                return fullContent;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException ex)
+            {
+                // 如果外部 CancellationToken 已取消，说明是用户主动取消（Ctrl+C），直接抛出不再重试
+                if (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                // 否则视为 HttpClient 超时或网络断开，纳入重试
+                _logger.LogWarning("LLM 请求被取消/超时，进入重试... (原因: {Reason})", ex.Message);
+                lastException = ex;
+            }
+            catch (Exception ex)
             {
                 lastException = ex;
             }
         }
 
         throw new InvalidOperationException($"LLM 请求在 {_config.MaxRetries} 次重试后仍然失败", lastException);
+    }
+
+    /// <summary>
+    /// 读取 SSE 流式响应，实时输出到控制台。
+    /// </summary>
+    private static async Task<string> ReadStreamAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+
+        // 启动等待第一个 token 的进度动画
+        var spinnerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var spinnerTask = RunSpinnerAsync(spinnerCts.Token);
+        var firstTokenReceived = false;
+
+        while (!ct.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(ct);
+            if (line == null)
+            {
+                break;
+            }
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            // SSE 格式: data: {...}
+            if (!line.StartsWith("data: "))
+            {
+                continue;
+            }
+
+            var data = line["data: ".Length..];
+            if (data == "[DONE]")
+            {
+                break;
+            }
+
+            try
+            {
+                var chunk = JsonSerializer.Deserialize<ChatCompletionStreamChunk>(data);
+                var delta = chunk?.Choices?.FirstOrDefault()?.Delta?.Content;
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    if (!firstTokenReceived)
+                    {
+                        firstTokenReceived = true;
+                        spinnerCts.Cancel();
+                        try { await spinnerTask; } catch { }
+                        Console.Write("\r                      \r"); // 清除进度行
+                    }
+
+                    sb.Append(delta);
+                    Console.Write(delta);
+                }
+            }
+            catch (JsonException)
+            {
+                // 跳过无法解析的行（如空数据或格式异常）
+            }
+        }
+
+        // 如果流结束但从未收到 token，取消 spinner
+        if (!firstTokenReceived)
+        {
+            spinnerCts.Cancel();
+            try { await spinnerTask; } catch { }
+            Console.Write("\r                      \r");
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 在等待第一个 SSE token 时显示旋转进度条。
+    /// </summary>
+    private static async Task RunSpinnerAsync(CancellationToken ct)
+    {
+        var chars = new[] { '|', '/', '-', '\\' };
+        int i = 0;
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                Console.Write($"\r等待模型首 token... {chars[i++ % chars.Length]}");
+                await Task.Delay(200, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
     }
 
     public void Dispose()
@@ -120,6 +256,9 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
 
         [JsonPropertyName("messages")]
         public List<Message> Messages { get; set; } = new();
+
+        [JsonPropertyName("stream")]
+        public bool Stream { get; set; }
     }
 
     private class Message
@@ -131,6 +270,7 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
         public string Content { get; set; } = string.Empty;
     }
 
+    // 非流式响应 DTO（保留以备 fallback 需要）
     private class ChatCompletionResponse
     {
         [JsonPropertyName("choices")]
@@ -141,5 +281,24 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
     {
         [JsonPropertyName("message")]
         public Message? Message { get; set; }
+    }
+
+    // 流式响应 DTO
+    private class ChatCompletionStreamChunk
+    {
+        [JsonPropertyName("choices")]
+        public List<StreamChoice>? Choices { get; set; }
+    }
+
+    private class StreamChoice
+    {
+        [JsonPropertyName("delta")]
+        public StreamDelta? Delta { get; set; }
+    }
+
+    private class StreamDelta
+    {
+        [JsonPropertyName("content")]
+        public string? Content { get; set; }
     }
 }

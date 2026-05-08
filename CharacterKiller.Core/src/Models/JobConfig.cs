@@ -20,4 +20,11 @@ public class JobConfig
     /// 输出模式。可选值："roleplay"（默认，生成 AI 角色扮演 skill）或 "template"（生成可复用的小说人物模板）。
     /// </summary>
     public string OutputMode { get; set; } = "roleplay";
+
+    /// <summary>
+    /// Skills 阶段输入 summary 的最大字符数。
+    /// 当 summary 超过此值时，会先分片调用 LLM 压缩提炼。
+    /// 设为 0 表示禁用压缩（使用原始完整 summary，可能触发超时）。
+    /// </summary>
+    public int SkillsMaxContextChars { get; set; } = 150000;
 }

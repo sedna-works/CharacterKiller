@@ -92,14 +92,16 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
     "CharacterName": "",
     "VndbCharacterId": null,
     "OutputDirectory": "output",
-    "OutputMode": "roleplay"
+    "OutputMode": "roleplay",
+    "SkillsMaxContextChars": 150000
   },
   "Jobs": [
     {
       "InputFiles": ["file1.txt", "file2.txt"],
       "CharacterName": "角色A",
       "OutputDirectory": "output/角色A",
-      "OutputMode": "template"
+      "OutputMode": "template",
+      "SkillsMaxContextChars": 150000
     }
   ],
   "Slicing": {
@@ -124,6 +126,7 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
   - `VndbCharacterId`：VNDB 角色 ID（可选）。
   - `OutputDirectory`：任务输出目录，默认 `output`。
   - `OutputMode`：输出模式。`roleplay`（默认）生成 AI 角色扮演 skill 文件夹；`template` 生成去剧情化、可复用的小说人物模板。
+  - `SkillsMaxContextChars`：Skills 阶段输入 summary 的最大字符数（默认 `150000`）。当 summary 长度超过此值时，会先分片调用 LLM 压缩提炼，再生成 Skills。设为 `0` 表示禁用压缩（使用原始完整 summary，可能触发超时）。
 - `Jobs`：批量任务列表。若 `Jobs` 非空，则优先执行批量任务，忽略 `Task`。每个 Job 的字段与 `Task` 相同，但不包含 `InputFile`（统一使用 `InputFiles` 列表）。
 - `Execution`：执行并发度配置。
   - `MaxChunkConcurrency`：Summarize 阶段单个角色的最大切片并发数。默认 `1`（顺序执行）。

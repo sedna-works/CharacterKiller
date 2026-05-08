@@ -75,9 +75,8 @@ public class SummarizePipeline
         var chunks = slicer.Slice(text, slicingConfig.ChunkSizeTokens, slicingConfig.OverlapTokens);
         _logger.LogInformation("文本切片完成，共 {Count} 块", chunks.Count);
 
-        // 3. 计算 Checkpoint ID（任务类型 + 角色名 + 文件内容哈希）
-        var fileHash = ComputeHash(text);
-        var checkpointId = $"summarize_{Sanitize(taskConfig.CharacterName)}_{fileHash[..8]}";
+        // 3. 计算 Checkpoint ID（任务类型 + 角色名）
+        var checkpointId = $"summarize_{Sanitize(taskConfig.CharacterName)}";
 
         // 4. 加载或创建 Checkpoint
         var checkpoint = await checkpointStore.LoadAsync<SummarizeTaskState>(checkpointId, ct);
@@ -160,7 +159,10 @@ public class SummarizePipeline
 
                     try
                     {
+                        Console.WriteLine($"[Summarize 切片 {index + 1}] 开始流式生成...");
+
                         var result = await _llmClient.CompleteAsync(systemPrompt, userPrompt, innerCt);
+                        Console.WriteLine();
 
                         // 保存切片结果到独立文件（大内容分离）
                         await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, innerCt);
@@ -243,7 +245,10 @@ public class SummarizePipeline
 
         try
         {
+            Console.WriteLine($"[Summarize 切片 {index + 1}] 开始流式生成...");
+
             var result = await _llmClient.CompleteAsync(systemPrompt, userPrompt, ct);
+            Console.WriteLine();
 
             // 保存切片结果到独立文件（大内容分离）
             await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, ct);
@@ -306,33 +311,16 @@ public class SummarizePipeline
     private static string RenderSummaryMarkdown(string characterName, List<string> segments, List<string> inputFiles)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"# {characterName} - 角色归纳");
-        sb.AppendLine();
-        sb.AppendLine($"> 生成时间：{DateTime.UtcNow:yyyy-MM-dd HH:mm}");
-        sb.AppendLine($"> 来源文本：{string.Join(", ", inputFiles)}");
-        sb.AppendLine($"> 归纳片段数：{segments.Count}");
-        sb.AppendLine();
-        sb.AppendLine("---");
+        sb.AppendLine($"# {characterName}");
         sb.AppendLine();
 
         for (int i = 0; i < segments.Count; i++)
         {
-            sb.AppendLine($"## 归纳片段 {i + 1}");
-            sb.AppendLine();
             sb.AppendLine(segments[i]);
-            sb.AppendLine();
-            sb.AppendLine("---");
             sb.AppendLine();
         }
 
         return sb.ToString();
-    }
-
-    private static string ComputeHash(string text)
-    {
-        var bytes = Encoding.UTF8.GetBytes(text);
-        var hash = SHA256.HashData(bytes);
-        return Convert.ToHexString(hash);
     }
 
     private static string Sanitize(string name)

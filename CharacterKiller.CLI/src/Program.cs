@@ -244,7 +244,8 @@ static TaskConfig MapJobToTask(JobConfig job)
         CharacterName = job.CharacterName,
         VndbCharacterId = job.VndbCharacterId,
         OutputDirectory = job.OutputDirectory,
-        OutputMode = job.OutputMode
+        OutputMode = job.OutputMode,
+        SkillsMaxContextChars = job.SkillsMaxContextChars
     };
 }
 
