@@ -57,6 +57,9 @@ dotnet run --project CharacterKiller.CLI -- summarize -c appsettings.json -i scr
 
 # 仅执行 skills（基于已有的 summary）
 dotnet run --project CharacterKiller.CLI -- skills -c appsettings.json -n 角色名
+
+# 使用 template 模式生成小说人物模板
+dotnet run --project CharacterKiller.CLI -- -c appsettings.json -i script.txt -n 角色名 -m template
 ```
 
 ### 发布
@@ -111,9 +114,13 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 ```
 
 - `Task`：单任务配置（命令行模式）。
-- `Jobs`：批量任务列表。若 `Jobs` 非空，则优先执行批量任务，忽略 `Task`。
-- `OutputMode`：输出模式。`roleplay`（默认）生成 AI 角色扮演 skill 文件夹；`template` 生成去剧情化、可复用的小说人物模板。
-- `InputFiles`：多文件输入，按顺序拼接后整体分析。若 `InputFiles` 非空，优先使用它，忽略 `InputFile`。
+  - `InputFile`：单文件输入路径。当 `InputFiles` 为空时使用。
+  - `InputFiles`：多文件输入列表，按顺序拼接后整体分析。若此列表非空，优先使用它，忽略 `InputFile`。
+  - `CharacterName`：目标角色名称。
+  - `VndbCharacterId`：VNDB 角色 ID（可选）。
+  - `OutputDirectory`：任务输出目录，默认 `output`。
+  - `OutputMode`：输出模式。`roleplay`（默认）生成 AI 角色扮演 skill 文件夹；`template` 生成去剧情化、可复用的小说人物模板。
+- `Jobs`：批量任务列表。若 `Jobs` 非空，则优先执行批量任务，忽略 `Task`。每个 Job 的字段与 `Task` 相同，但不包含 `InputFile`（统一使用 `InputFiles` 列表）。
 
 ### 环境变量
 
@@ -200,4 +207,5 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 
 - **新增 LLM Provider**：目前所有 provider（OpenAI、Kimi、DeepSeek、Ollama）均复用 `OpenAiCompatibleClient`。若需接入非 OpenAI 兼容接口，在 `LlmClientFactory` 中新增分支即可。
 - **更换 Token 估算器**：默认使用 `CharBasedEstimator`（字符近似）。可在 `ServiceRegistrar` 中替换为 `TiktokenEstimator`（需自行实现，Infrastructure 已引用 `Microsoft.ML.Tokenizers`）。
+- **新增 OutputMode**：在 `TaskConfig`/`JobConfig` 中设置 `OutputMode` 即可切换生成策略。`SkillsPipeline` 内部通过 `taskConfig.OutputMode` 分支选择 `RoleplayPromptBuilder` 或 `TemplatePromptBuilder`，并写入不同的输出目录结构。新增模式时，只需：1) 新增 `IPromptBuilder` 实现；2) 在 `SkillsPipeline` 中添加分支；3) 在 `TaskConfig`/`JobConfig` 中扩展枚举/字符串值。
 - **新增 Pipeline**：参考 `SummarizePipeline` / `SkillsPipeline`，利用 `ICheckpointStore` 的泛型接口实现新任务的断点续传。

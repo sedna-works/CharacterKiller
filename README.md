@@ -9,7 +9,9 @@
 ## 功能
 
 - **Summarize**：读取剧本文本，按段落切片后逐段调用 LLM 归纳目标角色信息，输出为 Markdown 摘要。
-- **Skills**：基于摘要文件，调用 LLM 生成 7 个角色扮演技能文件，打包为标准 skill 文件夹结构。
+- **Skills**：基于摘要文件，调用 LLM 生成角色资料包。支持两种输出模式：
+  - `roleplay`（默认）：生成 AI 角色扮演 skill 文件夹（7 个文件）。
+  - `template`：生成去剧情化、可复用的小说人物模板（7 个文件）。
 - **断点续传**：每个任务独立支持 Checkpoint，意外中断后可从中恢复，避免重复调用 LLM。
 - **多文件输入**：支持单文件或多个剧本文本按顺序合并后整体分析。
 - **批量任务**：通过配置文件中的 `Jobs` 列表一次性处理多个角色。
@@ -152,12 +154,14 @@ CharacterKiller.CLI skills -c appsettings.json -n 角色名
     {
       "InputFiles": ["脚本A.txt", "脚本B.txt"],
       "CharacterName": "角色A",
-      "OutputDirectory": "output/角色A"
+      "OutputDirectory": "output/角色A",
+      "OutputMode": "roleplay"
     },
     {
       "InputFiles": ["脚本C.txt"],
       "CharacterName": "角色B",
-      "OutputDirectory": "output/角色B"
+      "OutputDirectory": "output/角色B",
+      "OutputMode": "template"
     }
   ]
 }
@@ -257,6 +261,10 @@ Template 模式的核心处理：
 CharacterKiller/
 ├── CharacterKiller.Core/          # 领域模型、接口、核心服务
 ├── CharacterKiller.Application/   # 业务流水线（Pipeline）与 Prompt 构造
+│   └── src/Prompts/
+│       ├── SummarizePromptBuilder.cs
+│       ├── RoleplayPromptBuilder.cs   # roleplay 模式
+│       └── TemplatePromptBuilder.cs   # template 模式
 ├── CharacterKiller.Infrastructure/# LLM 客户端、Checkpoint、文件读取
 ├── CharacterKiller.CLI/           # 可执行入口、命令行解析
 ├── Tools/
