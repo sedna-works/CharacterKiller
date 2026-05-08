@@ -146,15 +146,27 @@ public class SkillsPipeline
         if (isTemplate)
         {
             outputBaseDir = Path.Combine(taskConfig.OutputDirectory, "templates");
-            mainDir = Path.Combine(outputBaseDir, Sanitize(taskConfig.CharacterName));
+            mainDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-template-main");
+            codeDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-template-code");
+
             Directory.CreateDirectory(mainDir);
+            Directory.CreateDirectory(codeDir);
 
             foreach (var (relativePath, content) in files)
             {
-                var filePath = Path.Combine(mainDir, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
-                await File.WriteAllTextAsync(filePath, content, ct);
-                _logger.LogInformation("写入模板文件：{Path}", filePath);
+                // 写入主目录
+                var mainFilePath = Path.Combine(mainDir, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(mainFilePath)!);
+                await File.WriteAllTextAsync(mainFilePath, content, ct);
+                _logger.LogInformation("写入 template 文件：{Path}", mainFilePath);
+
+                // 写入 code 目录（排除 limit.md）
+                if (!relativePath.Equals("limit.md", StringComparison.OrdinalIgnoreCase))
+                {
+                    var codeFilePath = Path.Combine(codeDir, relativePath);
+                    Directory.CreateDirectory(Path.GetDirectoryName(codeFilePath)!);
+                    await File.WriteAllTextAsync(codeFilePath, content, ct);
+                }
             }
         }
         else

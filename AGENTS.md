@@ -217,9 +217,10 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 - 文件：`SKILL.md`、`soul.md`、`limit.md`、`resource/behavior_guide.md`、`resource/speech_patterns.md`、`resource/relationship_dynamics.md`、`resource/key_life_events.md`
 
 **Template 模式输出**（`output/templates/`）：
-- `{角色名}/`
-- 文件：`README.md`、`profile.md`、`personality.md`、`background.md`、`behavior.md`、`speech.md`、`relationships.md`
-- 特点：隐去具体剧情、模糊化背景（如将具体家族替换为"贵族世家"）、保留角色原型特征。
+- `{角色名}-template-main/`：完整 skill 文件
+- `{角色名}-template-code/`：排除 `limit.md`
+- 文件：`SKILL.md`、`soul.md`、`limit.md`、`resource/behavior_guide.md`、`resource/speech_patterns.md`、`resource/relationship_dynamics.md`、`resource/key_life_events.md`
+- 特点：与 roleplay 模式完全相同的 skill 文件夹结构，但内容去剧情化、模糊世界观绑定（如将具体家族替换为"某个古老的神秘家族"），保留角色原型特征，可直接整合进 AI 剧本工作流或跨作品复用。
 
 ### Checkpoint（断点续传）
 
