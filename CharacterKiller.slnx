@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="CharacterKiller.Application/CharacterKiller.Application.csproj" />
+  <Project Path="CharacterKiller.CLI/CharacterKiller.CLI.csproj" />
   <Project Path="CharacterKiller.Core/CharacterKiller.Core.csproj" />
   <Project Path="CharacterKiller.Infrastructure/CharacterKiller.Infrastructure.csproj" />
 </Solution>
