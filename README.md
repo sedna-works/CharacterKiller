@@ -10,11 +10,13 @@
 
 - **Summarize**：读取剧本文本，按段落切片后逐段调用 LLM 归纳目标角色信息，输出为 Markdown 摘要。
 - **Skills**：基于摘要文件，调用 LLM 生成角色资料包。支持两种输出模式：
-  - `roleplay`（默认）：生成 AI 角色扮演 roleplay 文件夹（7 个文件）。
-  - `template`：生成去剧情化、可复用的小说人物模板（7 个文件）。
+  - `roleplay`（默认）：生成 AI 角色扮演 skill 文件夹（7 个文件）。
+  - `template`：生成去剧情化、可复用的小说人物模板 skill 文件夹（7 个文件，内容与 roleplay 同源但去除剧情绑定）。
+- **流式输出**：LLM 生成内容实时打印到终端，可直观看到处理进度。
 - **断点续传**：每个任务独立支持 Checkpoint，意外中断后可从中恢复，避免重复调用 LLM。
 - **多文件输入**：支持单文件或多个剧本文本按顺序合并后整体分析。
 - **批量任务**：通过配置文件中的 `Jobs` 列表一次性处理多个角色。
+- **摘要自动压缩**：当 summary 过长时自动分片压缩，压缩结果缓存到磁盘避免重复消耗 Token。
 
 ---
 
@@ -28,12 +30,22 @@
 
 ### 使用脚本（推荐）
 
+**Windows（PowerShell）**：
 ```powershell
 # 框架依赖，单文件（约 2 MB）
 .\Tools\build.ps1
 
 # 自包含 + 指定运行时（约 74 MB，无需安装 .NET 运行时）
 .\Tools\build.ps1 -Runtime win-x64 -SelfContained
+```
+
+**Linux / macOS（Bash）**：
+```bash
+# 框架依赖，单文件
+./Tools/build.sh
+
+# 自包含 + 指定运行时
+./Tools/build.sh -r osx-arm64 --self-contained
 ```
 
 产物输出到项目根目录的 `publish/`（或 `publish/{RID}/`）。
@@ -65,7 +77,8 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
     "InputFile": "script.txt",
     "CharacterName": "角色名",
     "OutputDirectory": "output",
-    "OutputMode": "roleplay"
+    "OutputMode": "roleplay",
+    "SkillsMaxContextChars": 150000
   }
 }
 ```
@@ -80,7 +93,8 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
     "Model": "gpt-4o-mini",
     "ApiKey": "your-api-key",
     "MaxRetries": 3,
-    "TimeoutSeconds": 120
+    "TimeoutSeconds": 120,
+    "MaxConcurrency": 1
   },
   "Task": {
     "InputFile": "script.txt",
@@ -88,14 +102,16 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
     "CharacterName": "",
     "VndbCharacterId": null,
     "OutputDirectory": "output",
-    "OutputMode": "roleplay"
+    "OutputMode": "roleplay",
+    "SkillsMaxContextChars": 150000
   },
   "Jobs": [
     {
       "InputFiles": ["file1.txt", "file2.txt"],
       "CharacterName": "角色A",
       "OutputDirectory": "output/角色A",
-      "OutputMode": "template"
+      "OutputMode": "template",
+      "SkillsMaxContextChars": 150000
     }
   ],
   "Slicing": {
@@ -112,6 +128,11 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
   }
 }
 ```
+
+### 配置项说明
+
+- `Llm.MaxConcurrency`：同时向 LLM API 发出的最大并发 HTTP 请求数，默认 `1`。
+- `Task.SkillsMaxContextChars`：Skills 阶段允许的最大摘要字符数。若 summary 超过此值，会先分片调用 LLM 压缩提炼，结果缓存到 `summaries/compressed_{角色名}.md`。设为 `0` 禁用压缩。
 
 ### 配置优先级
 
@@ -204,19 +225,23 @@ output/roleplay/{角色名}-roleplay-code/
 └── （同上，但排除 limit.md）
 ```
 
-### Template 阶段（`OutputMode: template`）
+### Skills 阶段（`OutputMode: template`）
 
-生成可复用的小说人物模板：
+生成去剧情化的可复用角色模板 skill 文件夹，**结构与 roleplay 完全一致**：
 
 ```
-output/templates/{角色名}/
-├── README.md          # 模板使用说明与适配建议
-├── profile.md         # 人物档案（外貌、气质、穿着风格）
-├── personality.md     # 性格内核（价值观、驱动力、成长弧线）
-├── background.md      # 模糊化背景（家庭/社会阶层抽象描述）
-├── behavior.md        # 行为模式（习惯、反应、决策风格）
-├── speech.md          # 语言特征（用词、语气、口头禅）
-└── relationships.md   # 关系原型（互动模式，不绑定具体角色）
+output/templates/{角色名}-template-main/
+├── SKILL.md          # 模板使用说明与跨世界观适配指南
+├── soul.md           # 角色内核（去剧情化）
+├── limit.md          # 限制与边界
+└── resource/
+    ├── behavior_guide.md
+    ├── speech_patterns.md
+    ├── relationship_dynamics.md
+    └── key_life_events.md   # 抽象化经历（非具体剧情）
+
+output/templates/{角色名}-template-code/
+└── （同上，但排除 limit.md）
 ```
 
 Template 模式的核心处理：
@@ -269,7 +294,8 @@ Template 模式的核心处理：
 - **API Key**：通过配置文件或 `GCS_APIKEY` 环境变量传入，切勿硬编码到源码中。
 - **LLM JSON 输出**：Skills 阶段依赖 LLM 返回合法 JSON。若解析失败，程序会抛出异常并记录原始响应的前 2000 个字符以便排查。
 - **Token 估算**：默认使用字符近似估算器（`CharBasedEstimator`）。如需更精确的 `cl100k_base` Tiktoken 估算，可自行在 `ServiceRegistrar` 中替换实现（项目已引用 `Microsoft.ML.Tokenizers`）。
-- **并发执行**：开启 `Execution.MaxChunkConcurrency` 或 `MaxJobConcurrency` 后，不同角色/切片会并行调用 LLM。建议配合 `Llm.MaxConcurrency` 限制总 HTTP 并发数，避免触发 Rate Limit。
+- **流式输出**：LLM 生成内容会实时打印到终端。在首 token 到达前会显示旋转进度条，若长时间无响应请检查网络或 API 状态。
+- **文件大小限制**：`LocalFileReader` 拒绝读取超过 500 MB 的输入文件。
 - **文件路径**：输出文件名会对角色名进行清理（移除非法字符），但输入文件路径未做深度校验，请确保传入可信路径。
 
 ---
@@ -288,14 +314,17 @@ Template 模式的核心处理：
 ```
 CharacterKiller/
 ├── CharacterKiller.Core/          # 领域模型、接口、核心服务
+│   └── src/Resilience/
+│       └── RetryPolicy.cs         # 通用重试策略（指数退避）
 ├── CharacterKiller.Application/   # 业务流水线（Pipeline）与 Prompt 构造
 │   └── src/Prompts/
 │       ├── SummarizePromptBuilder.cs
-│       ├── RoleplayPromptBuilder.cs   # roleplay 模式
-│       └── TemplatePromptBuilder.cs   # template 模式
+│       ├── RoleplayPromptBuilder.cs
+│       └── TemplatePromptBuilder.cs
 ├── CharacterKiller.Infrastructure/# LLM 客户端、Checkpoint、文件读取
 ├── CharacterKiller.CLI/           # 可执行入口、命令行解析
 ├── Tools/
-│   └── build.ps1                  # 一键构建脚本
+│   ├── build.ps1                  # Windows 构建脚本
+│   └── build.sh                   # Linux / macOS 构建脚本
 └── README.md
 ```
