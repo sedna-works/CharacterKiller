@@ -10,7 +10,7 @@
 
 - **Summarize**：读取剧本文本，按段落切片后逐段调用 LLM 归纳目标角色信息，输出为 Markdown 摘要。
 - **Skills**：基于摘要文件，调用 LLM 生成角色资料包。支持两种输出模式：
-  - `roleplay`（默认）：生成 AI 角色扮演 skill 文件夹（7 个文件）。
+  - `roleplay`（默认）：生成 AI 角色扮演 roleplay 文件夹（7 个文件）。
   - `template`：生成去剧情化、可复用的小说人物模板（7 个文件）。
 - **断点续传**：每个任务独立支持 Checkpoint，意外中断后可从中恢复，避免重复调用 LLM。
 - **多文件输入**：支持单文件或多个剧本文本按顺序合并后整体分析。
@@ -190,7 +190,7 @@ output/summaries/{角色名}.md
 生成 AI 角色扮演 skill 文件夹：
 
 ```
-output/skills/{角色名}-skill-main/
+output/roleplay/{角色名}-roleplay-main/
 ├── SKILL.md
 ├── soul.md
 ├── limit.md
@@ -200,7 +200,7 @@ output/skills/{角色名}-skill-main/
     ├── relationship_dynamics.md
     └── key_life_events.md
 
-output/skills/{角色名}-skill-code/
+output/roleplay/{角色名}-roleplay-code/
 └── （同上，但排除 limit.md）
 ```
 

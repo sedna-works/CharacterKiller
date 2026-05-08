@@ -157,9 +157,9 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
    - `template`：生成去剧情化的小说人物模板。
 3. 解析 JSON 并写入对应文件夹结构。
 
-**Roleplay 模式输出**（`output/skills/`）：
-- `{角色名}-skill-main/`：完整文件
-- `{角色名}-skill-code/`：排除 `limit.md`
+**Roleplay 模式输出**（`output/roleplay/`）：
+- `{角色名}-roleplay-main/`：完整文件
+- `{角色名}-roleplay-code/`：排除 `limit.md`
 - 文件：`SKILL.md`、`soul.md`、`limit.md`、`resource/behavior_guide.md`、`resource/speech_patterns.md`、`resource/relationship_dynamics.md`、`resource/key_life_events.md`
 
 **Template 模式输出**（`output/templates/`）：

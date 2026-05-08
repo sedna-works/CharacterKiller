@@ -147,9 +147,9 @@ public class SkillsPipeline
         }
         else
         {
-            outputBaseDir = Path.Combine(taskConfig.OutputDirectory, "skills");
-            mainDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-skill-main");
-            codeDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-skill-code");
+            outputBaseDir = Path.Combine(taskConfig.OutputDirectory, "roleplay");
+            mainDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-roleplay-main");
+            codeDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-roleplay-code");
 
             Directory.CreateDirectory(mainDir);
             Directory.CreateDirectory(codeDir);
@@ -160,7 +160,7 @@ public class SkillsPipeline
                 var mainFilePath = Path.Combine(mainDir, relativePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(mainFilePath)!);
                 await File.WriteAllTextAsync(mainFilePath, content, ct);
-                _logger.LogInformation("写入技能包文件：{Path}", mainFilePath);
+                _logger.LogInformation("写入 roleplay 文件：{Path}", mainFilePath);
 
                 // 写入 code 目录（排除 limit.md）
                 if (!relativePath.Equals("limit.md", StringComparison.OrdinalIgnoreCase))
@@ -187,7 +187,7 @@ public class SkillsPipeline
         }
         else
         {
-            _logger.LogInformation("Skills 生成完成，主目录：{MainDir}，Code 目录：{CodeDir}", mainDir, codeDir);
+            _logger.LogInformation("Roleplay 生成完成，主目录：{MainDir}，Code 目录：{CodeDir}", mainDir, codeDir);
         }
     }
 
