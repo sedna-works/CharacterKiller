@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CharacterKiller.Core.Interfaces;
 using CharacterKiller.Core.Models;
+using CharacterKiller.Core.Resilience;
 using Microsoft.Extensions.Logging;
 
 namespace CharacterKiller.Infrastructure.Llm;
@@ -77,23 +78,13 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
         };
 
         var url = _config.BaseUrl.TrimEnd('/') + "/chat/completions";
-        var lastException = default(Exception);
 
-        for (var attempt = 0; attempt <= _config.MaxRetries; attempt++)
-        {
-            try
+        return await RetryPolicy.ExecuteAsync(
+            async () =>
             {
-                if (attempt > 0)
-                {
-                    var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt - 1));
-                    _logger.LogWarning("LLM 请求失败，第 {Attempt} 次重试，等待 {Delay}s...", attempt, delay.TotalSeconds);
-                    await Task.Delay(delay, ct);
-                }
-
                 using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
                 _logger.LogDebug("LLM 请求体大小: ~{Size} chars", systemPrompt.Length + userPrompt.Length);
-                _logger.LogInformation("正在发送 LLM 请求... (尝试 {Attempt}/{MaxAttempts})", attempt, _config.MaxRetries);
 
                 var content = JsonContent.Create(request);
                 using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
@@ -121,28 +112,12 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
                     throw new InvalidOperationException("LLM 返回空内容");
                 }
 
-                _logger.LogInformation("LLM 请求成功 (尝试 {Attempt})", attempt);
                 return fullContent;
-            }
-            catch (OperationCanceledException ex)
-            {
-                // 如果外部 CancellationToken 已取消，说明是用户主动取消（Ctrl+C），直接抛出不再重试
-                if (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-
-                // 否则视为 HttpClient 超时或网络断开，纳入重试
-                _logger.LogWarning("LLM 请求被取消/超时，进入重试... (原因: {Reason})", ex.Message);
-                lastException = ex;
-            }
-            catch (Exception ex)
-            {
-                lastException = ex;
-            }
-        }
-
-        throw new InvalidOperationException($"LLM 请求在 {_config.MaxRetries} 次重试后仍然失败", lastException);
+            },
+            maxRetries: _config.MaxRetries,
+            canRetry: ex => ex is not OperationCanceledException || !ct.IsCancellationRequested,
+            logger: _logger,
+            ct: ct);
     }
 
     /// <summary>
