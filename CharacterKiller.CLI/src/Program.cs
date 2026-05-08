@@ -24,6 +24,11 @@ var characterOption = new Option<string>("--character", "-n")
     Description = "角色分析名称（单任务模式使用）"
 };
 
+var modeOption = new Option<string>("--mode", "-m")
+{
+    Description = "输出模式：roleplay（默认，生成 AI 角色扮演 skill）或 template（生成可复用的小说人物模板）"
+};
+
 // --- 定义命令 ---
 var rootCommand = new RootCommand("CharacterKiller - Galgame 角色信息提炼工具")
 {
@@ -44,8 +49,11 @@ summarizeCommand.Options.Add(characterOption);
 runCommand.Options.Add(inputOption);
 runCommand.Options.Add(characterOption);
 
-// skills 只需要 character（用于定位 summary 文件）
 skillsCommand.Options.Add(characterOption);
+
+summarizeCommand.Options.Add(modeOption);
+skillsCommand.Options.Add(modeOption);
+runCommand.Options.Add(modeOption);
 
 // --- 设置 Action ---
 
@@ -66,7 +74,7 @@ summarizeCommand.SetAction(async (parseResult, cancellationToken) =>
     }
     else
     {
-        ApplyTaskOverrides(config, parseResult, inputOption, characterOption);
+        ApplyTaskOverrides(config, parseResult, inputOption, characterOption, modeOption);
         ValidateTaskConfig(config.Task, requireInput: true);
         logger.LogInformation("执行 Summarize：角色={Character}，剧本={Input}", config.Task.CharacterName, config.Task.InputFile);
         var pipeline = provider.GetRequiredService<SummarizePipeline>();
@@ -94,9 +102,9 @@ skillsCommand.SetAction(async (parseResult, cancellationToken) =>
     }
     else
     {
-        ApplyTaskOverrides(config, parseResult, inputOption: null, characterOption);
+        ApplyTaskOverrides(config, parseResult, inputOption: null, characterOption, modeOption);
         ValidateTaskConfig(config.Task, requireInput: false);
-        logger.LogInformation("执行 Skills：角色={Character}", config.Task.CharacterName);
+        logger.LogInformation("执行 Skills：角色={Character}，模式={Mode}", config.Task.CharacterName, config.Task.OutputMode);
         var pipeline = provider.GetRequiredService<SkillsPipeline>();
         await pipeline.RunAsync(config.Task, cancellationToken);
     }
@@ -125,9 +133,9 @@ runCommand.SetAction(async (parseResult, cancellationToken) =>
     }
     else
     {
-        ApplyTaskOverrides(config, parseResult, inputOption, characterOption);
+        ApplyTaskOverrides(config, parseResult, inputOption, characterOption, modeOption);
         ValidateTaskConfig(config.Task, requireInput: true);
-        logger.LogInformation("执行 Run：角色={Character}，剧本={Input}", config.Task.CharacterName, config.Task.InputFile);
+        logger.LogInformation("执行 Run：角色={Character}，剧本={Input}，模式={Mode}", config.Task.CharacterName, config.Task.InputFile, config.Task.OutputMode);
 
         var summarize = provider.GetRequiredService<SummarizePipeline>();
         await summarize.RunAsync(config.Task, config.Slicing, cancellationToken);
@@ -161,9 +169,9 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
     }
     else
     {
-        ApplyTaskOverrides(config, parseResult, inputOption, characterOption);
+        ApplyTaskOverrides(config, parseResult, inputOption, characterOption, modeOption);
         ValidateTaskConfig(config.Task, requireInput: true);
-        logger.LogInformation("执行 Run：角色={Character}，剧本={Input}", config.Task.CharacterName, config.Task.InputFile);
+        logger.LogInformation("执行 Run：角色={Character}，剧本={Input}，模式={Mode}", config.Task.CharacterName, config.Task.InputFile, config.Task.OutputMode);
 
         var summarize = provider.GetRequiredService<SummarizePipeline>();
         await summarize.RunAsync(config.Task, config.Slicing, cancellationToken);
@@ -219,11 +227,12 @@ static TaskConfig MapJobToTask(JobConfig job)
         InputFiles = job.InputFiles,
         CharacterName = job.CharacterName,
         VndbCharacterId = job.VndbCharacterId,
-        OutputDirectory = job.OutputDirectory
+        OutputDirectory = job.OutputDirectory,
+        OutputMode = job.OutputMode
     };
 }
 
-static void ApplyTaskOverrides(CliConfig config, ParseResult parseResult, Option<string>? inputOption, Option<string>? characterOption)
+static void ApplyTaskOverrides(CliConfig config, ParseResult parseResult, Option<string>? inputOption, Option<string>? characterOption, Option<string>? modeOption = null)
 {
     if (inputOption != null)
     {
@@ -240,6 +249,15 @@ static void ApplyTaskOverrides(CliConfig config, ParseResult parseResult, Option
         if (!string.IsNullOrEmpty(character))
         {
             config.Task.CharacterName = character;
+        }
+    }
+
+    if (modeOption != null)
+    {
+        var mode = parseResult.GetValue(modeOption);
+        if (!string.IsNullOrEmpty(mode))
+        {
+            config.Task.OutputMode = mode;
         }
     }
 }

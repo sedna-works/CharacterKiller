@@ -88,13 +88,15 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
     "InputFiles": [],
     "CharacterName": "",
     "VndbCharacterId": null,
-    "OutputDirectory": "output"
+    "OutputDirectory": "output",
+    "OutputMode": "roleplay"
   },
   "Jobs": [
     {
       "InputFiles": ["file1.txt", "file2.txt"],
       "CharacterName": "角色A",
-      "OutputDirectory": "output/角色A"
+      "OutputDirectory": "output/角色A",
+      "OutputMode": "template"
     }
   ],
   "Slicing": {
@@ -110,6 +112,7 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 
 - `Task`：单任务配置（命令行模式）。
 - `Jobs`：批量任务列表。若 `Jobs` 非空，则优先执行批量任务，忽略 `Task`。
+- `OutputMode`：输出模式。`roleplay`（默认）生成 AI 角色扮演 skill 文件夹；`template` 生成去剧情化、可复用的小说人物模板。
 - `InputFiles`：多文件输入，按顺序拼接后整体分析。若 `InputFiles` 非空，优先使用它，忽略 `InputFile`。
 
 ### 环境变量
@@ -135,12 +138,20 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 `SkillsPipeline` 负责：
 
 1. 读取上述 summary 文件。
-2. 调用 LLM，要求返回一个 JSON 对象，包含 7 个文件的内容。
-3. 解析 JSON 并写入文件夹结构：
-   - `output/skills/{角色名}-skill-main/`（完整文件）
-   - `output/skills/{角色名}-skill-code/`（排除 `limit.md`）
+2. 根据 `OutputMode` 决定生成策略：
+   - `roleplay`（默认）：生成 AI 角色扮演 skill 包。
+   - `template`：生成去剧情化的小说人物模板。
+3. 解析 JSON 并写入对应文件夹结构。
 
-生成的文件包括：`SKILL.md`、`soul.md`、`limit.md`、`resource/behavior_guide.md`、`resource/speech_patterns.md`、`resource/relationship_dynamics.md`、`resource/key_life_events.md`。
+**Roleplay 模式输出**（`output/skills/`）：
+- `{角色名}-skill-main/`：完整文件
+- `{角色名}-skill-code/`：排除 `limit.md`
+- 文件：`SKILL.md`、`soul.md`、`limit.md`、`resource/behavior_guide.md`、`resource/speech_patterns.md`、`resource/relationship_dynamics.md`、`resource/key_life_events.md`
+
+**Template 模式输出**（`output/templates/`）：
+- `{角色名}/`
+- 文件：`README.md`、`profile.md`、`personality.md`、`background.md`、`behavior.md`、`speech.md`、`relationships.md`
+- 特点：隐去具体剧情、模糊化背景（如将具体家族替换为"贵族世家"）、保留角色原型特征。
 
 ### Checkpoint（断点续传）
 

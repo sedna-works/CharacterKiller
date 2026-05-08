@@ -93,8 +93,13 @@ public class SkillsPipeline
         }
 
         // 4. 调用 LLM 生成技能包
-        var systemPrompt = SkillsPromptBuilder.BuildSystemPrompt(taskConfig.CharacterName);
-        var userPrompt = SkillsPromptBuilder.BuildUserPrompt(taskConfig.CharacterName, summaryText);
+        var isTemplate = taskConfig.OutputMode.Equals("template", StringComparison.OrdinalIgnoreCase);
+        var systemPrompt = isTemplate
+            ? TemplatePromptBuilder.BuildSystemPrompt(taskConfig.CharacterName)
+            : RoleplayPromptBuilder.BuildSystemPrompt(taskConfig.CharacterName);
+        var userPrompt = isTemplate
+            ? TemplatePromptBuilder.BuildUserPrompt(taskConfig.CharacterName, summaryText)
+            : RoleplayPromptBuilder.BuildUserPrompt(taskConfig.CharacterName, summaryText);
 
         string response;
         try
@@ -121,28 +126,49 @@ public class SkillsPipeline
             throw;
         }
 
-        // 6. 保存技能包文件
-        var outputBaseDir = Path.Combine(taskConfig.OutputDirectory, "skills");
-        var mainDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-skill-main");
-        var codeDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-skill-code");
+        // 6. 保存生成文件
+        string outputBaseDir;
+        string mainDir;
+        string? codeDir = null;
 
-        Directory.CreateDirectory(mainDir);
-        Directory.CreateDirectory(codeDir);
-
-        foreach (var (relativePath, content) in files)
+        if (isTemplate)
         {
-            // 写入主目录
-            var mainFilePath = Path.Combine(mainDir, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(mainFilePath)!);
-            await File.WriteAllTextAsync(mainFilePath, content, ct);
-            _logger.LogInformation("写入技能包文件：{Path}", mainFilePath);
+            outputBaseDir = Path.Combine(taskConfig.OutputDirectory, "templates");
+            mainDir = Path.Combine(outputBaseDir, Sanitize(taskConfig.CharacterName));
+            Directory.CreateDirectory(mainDir);
 
-            // 写入 code 目录（排除 limit.md）
-            if (!relativePath.Equals("limit.md", StringComparison.OrdinalIgnoreCase))
+            foreach (var (relativePath, content) in files)
             {
-                var codeFilePath = Path.Combine(codeDir, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(codeFilePath)!);
-                await File.WriteAllTextAsync(codeFilePath, content, ct);
+                var filePath = Path.Combine(mainDir, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+                await File.WriteAllTextAsync(filePath, content, ct);
+                _logger.LogInformation("写入模板文件：{Path}", filePath);
+            }
+        }
+        else
+        {
+            outputBaseDir = Path.Combine(taskConfig.OutputDirectory, "skills");
+            mainDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-skill-main");
+            codeDir = Path.Combine(outputBaseDir, $"{Sanitize(taskConfig.CharacterName)}-skill-code");
+
+            Directory.CreateDirectory(mainDir);
+            Directory.CreateDirectory(codeDir);
+
+            foreach (var (relativePath, content) in files)
+            {
+                // 写入主目录
+                var mainFilePath = Path.Combine(mainDir, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(mainFilePath)!);
+                await File.WriteAllTextAsync(mainFilePath, content, ct);
+                _logger.LogInformation("写入技能包文件：{Path}", mainFilePath);
+
+                // 写入 code 目录（排除 limit.md）
+                if (!relativePath.Equals("limit.md", StringComparison.OrdinalIgnoreCase))
+                {
+                    var codeFilePath = Path.Combine(codeDir, relativePath);
+                    Directory.CreateDirectory(Path.GetDirectoryName(codeFilePath)!);
+                    await File.WriteAllTextAsync(codeFilePath, content, ct);
+                }
             }
         }
 
@@ -155,7 +181,14 @@ public class SkillsPipeline
         checkpoint.Progress.CurrentPhase = "completed";
         await checkpointStore.SaveAsync(checkpoint, ct);
 
-        _logger.LogInformation("Skills 生成完成，主目录：{MainDir}，Code 目录：{CodeDir}", mainDir, codeDir);
+        if (isTemplate)
+        {
+            _logger.LogInformation("模板生成完成，输出目录：{MainDir}", mainDir);
+        }
+        else
+        {
+            _logger.LogInformation("Skills 生成完成，主目录：{MainDir}，Code 目录：{CodeDir}", mainDir, codeDir);
+        }
     }
 
     private static Dictionary<string, string> ParseSkillPack(string response)

@@ -22,4 +22,9 @@ public class TaskConfig
     public string? VndbCharacterId { get; set; }
 
     public string OutputDirectory { get; set; } = "output";
+
+    /// <summary>
+    /// 输出模式。可选值："roleplay"（默认，生成 AI 角色扮演 skill）或 "template"（生成可复用的小说人物模板）。
+    /// </summary>
+    public string OutputMode { get; set; } = "roleplay";
 }

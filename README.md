@@ -62,7 +62,8 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
   "Task": {
     "InputFile": "script.txt",
     "CharacterName": "角色名",
-    "OutputDirectory": "output"
+    "OutputDirectory": "output",
+    "OutputMode": "roleplay"
   }
 }
 ```
@@ -84,13 +85,15 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
     "InputFiles": [],
     "CharacterName": "",
     "VndbCharacterId": null,
-    "OutputDirectory": "output"
+    "OutputDirectory": "output",
+    "OutputMode": "roleplay"
   },
   "Jobs": [
     {
       "InputFiles": ["file1.txt", "file2.txt"],
       "CharacterName": "角色A",
-      "OutputDirectory": "output/角色A"
+      "OutputDirectory": "output/角色A",
+      "OutputMode": "template"
     }
   ],
   "Slicing": {
@@ -120,7 +123,11 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 ### 默认流程（summarize + skills）
 
 ```bash
+# 角色扮演模式（默认）
 CharacterKiller.CLI -c appsettings.json -i script.txt -n 角色名
+
+# 人物模板模式
+CharacterKiller.CLI -c appsettings.json -i script.txt -n 角色名 -m template
 ```
 
 ### 仅执行 summarize
@@ -170,9 +177,9 @@ CharacterKiller.CLI skills -c appsettings.json -n 角色名
 output/summaries/{角色名}.md
 ```
 
-### Skills 阶段
+### Skills 阶段（`OutputMode: roleplay`）
 
-生成角色 skill 文件夹：
+生成 AI 角色扮演 skill 文件夹：
 
 ```
 output/skills/{角色名}-skill-main/
@@ -189,6 +196,26 @@ output/skills/{角色名}-skill-code/
 └── （同上，但排除 limit.md）
 ```
 
+### Template 阶段（`OutputMode: template`）
+
+生成可复用的小说人物模板：
+
+```
+output/templates/{角色名}/
+├── README.md          # 模板使用说明与适配建议
+├── profile.md         # 人物档案（外貌、气质、穿着风格）
+├── personality.md     # 性格内核（价值观、驱动力、成长弧线）
+├── background.md      # 模糊化背景（家庭/社会阶层抽象描述）
+├── behavior.md        # 行为模式（习惯、反应、决策风格）
+├── speech.md          # 语言特征（用词、语气、口头禅）
+└── relationships.md   # 关系原型（互动模式，不绑定具体角色）
+```
+
+Template 模式的核心处理：
+- **隐去具体剧情**：不保留原作的具体事件、具体人名、具体地点。
+- **背景模糊化**：例如"远坂家的大小姐"→"神秘传承贵族世家的继承人"。
+- **保留原型特征**：性格、行为、语言、关系动态等本质特征完整保留，以 archetype（原型）形式呈现。
+
 ### Checkpoint
 
 断点续传数据保存在任务输出目录下的 `checkpoints/` 子目录中。若已完成的切片结果文件缺失，恢复时会自动移回待处理队列重新执行。
@@ -202,6 +229,7 @@ output/skills/{角色名}-skill-code/
 | `-c, --config <path>` | 指定配置文件路径（默认 `appsettings.json`） |
 | `-i, --input <path>` | 指定输入剧本文件（覆盖 `Task.InputFile`） |
 | `-n, --character <name>` | 指定角色名（覆盖 `Task.CharacterName`） |
+| `-m, --mode <mode>` | 输出模式：`roleplay` 或 `template`（覆盖 `Task.OutputMode`） |
 
 ---
 

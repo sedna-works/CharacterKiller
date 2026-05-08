@@ -4,7 +4,7 @@ namespace CharacterKiller.Application.Prompts;
 /// Skills 生成阶段 Prompt 构造器。
 /// 参考原项目结构，要求 LLM 返回完整的技能包文件夹内容。
 /// </summary>
-public static class SkillsPromptBuilder
+public static class RoleplayPromptBuilder
 {
     public static string BuildSystemPrompt(string characterName)
     {
