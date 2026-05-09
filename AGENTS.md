@@ -46,20 +46,8 @@
 # 构建整个解决方案
 dotnet build
 
-# 运行 CLI（默认执行 summarize + skills）
-dotnet run --project CharacterKiller.CLI
-
-# 指定配置文件与参数
-dotnet run --project CharacterKiller.CLI -- -c appsettings.json -i script.txt -n 角色名
-
-# 仅执行 summarize
-dotnet run --project CharacterKiller.CLI -- summarize -c appsettings.json -i script.txt -n 角色名
-
-# 仅执行 skills（基于已有的 summary）
-dotnet run --project CharacterKiller.CLI -- skills -c appsettings.json -n 角色名
-
-# 使用 template 模式生成小说人物模板
-dotnet run --project CharacterKiller.CLI -- -c appsettings.json -i script.txt -n 角色名 -m template
+# 运行 CLI（必须指定配置文件）
+dotnet run --project CharacterKiller.CLI -- -c appsettings.json
 ```
 
 ### 发布
@@ -82,7 +70,7 @@ dotnet publish CharacterKiller.CLI -c Release -o ./publish
 
 ## 配置
 
-CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他路径。**配置文件为必需项**，若未指定且默认文件不存在，程序将报错退出。
+CLI 必须通过 `-c` 或 `--config` 参数指定配置文件路径，**不再提供默认配置**。
 
 配置结构对应 `CharacterKiller.CLI.Configuration.CliConfig`：
 
@@ -130,7 +118,7 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 }
 ```
 
-- `Task`：单任务配置（命令行模式）。
+- `Task`：单任务配置。
   - `InputFile`：单文件输入路径。当 `InputFiles` 为空时使用。
   - `InputFiles`：多文件输入列表，按顺序拼接后整体分析。若此列表非空，优先使用它，忽略 `InputFile`。
   - `CharacterName`：目标角色名称。
@@ -146,10 +134,9 @@ CLI 默认读取 `appsettings.json`，可通过 `-c` 或 `--config` 指定其他
 
 ### 配置优先级
 
-1. 命令行参数（仅覆盖 `Task` 的少量字段）
-2. 环境变量（前缀 `GCS_`，如 `GCS_LLM__MODEL`）
-3. `GCS_APIKEY`（单独覆盖 `Llm.ApiKey`）
-4. JSON 配置文件
+1. 环境变量（前缀 `GCS_`，如 `GCS_LLM__MODEL`）
+2. `GCS_APIKEY`（单独覆盖 `Llm.ApiKey`）
+3. JSON 配置文件（通过 `--config` 指定）
 
 > 环境变量中使用双下划线 `__` 表示配置层级，例如 `GCS_LLM__BASEURL` 对应 `Llm.BaseUrl`。
 
