@@ -1,8 +1,8 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using CharacterKiller.Core.Interfaces;
 using CharacterKiller.Core.Models;
 using CharacterKiller.Core.Services;
+using Microsoft.Extensions.Logging;
 
 namespace CharacterKiller.Infrastructure.Storage;
 
@@ -14,10 +14,12 @@ public class JsonCheckpointStore : ICheckpointStore, IDisposable
 {
     private readonly string _baseDir;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly ILogger<JsonCheckpointStore>? _logger;
 
-    public JsonCheckpointStore(string baseDir)
+    public JsonCheckpointStore(string baseDir, ILogger<JsonCheckpointStore>? logger = null)
     {
         _baseDir = Path.IsPathRooted(baseDir) ? baseDir : Path.Combine(Directory.GetCurrentDirectory(), baseDir);
+        _logger = logger;
     }
 
     public void Dispose()
@@ -28,7 +30,7 @@ public class JsonCheckpointStore : ICheckpointStore, IDisposable
     public ICheckpointStore WithBaseDir(string baseDir)
     {
         var resolvedPath = Path.IsPathRooted(baseDir) ? baseDir : Path.Combine(_baseDir, baseDir);
-        return new JsonCheckpointStore(resolvedPath);
+        return new JsonCheckpointStore(resolvedPath, _logger);
     }
 
     public async Task<CheckpointState<TState>?> LoadAsync<TState>(string checkpointId, CancellationToken ct = default)
@@ -62,22 +64,23 @@ public class JsonCheckpointStore : ICheckpointStore, IDisposable
         }
     }
 
-    public Task DeleteAsync(string checkpointId, CancellationToken ct = default)
+    public async Task DeleteAsync(string checkpointId, CancellationToken ct = default)
     {
-        var path = GetCheckpointPath(checkpointId);
-        if (File.Exists(path))
+        await Task.Run(() =>
         {
-            File.Delete(path);
-        }
+            var path = GetCheckpointPath(checkpointId);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
 
-        // 清理临时切片结果目录
-        var tempDir = GetTempDir(checkpointId);
-        if (Directory.Exists(tempDir))
-        {
-            Directory.Delete(tempDir, recursive: true);
-        }
-
-        return Task.CompletedTask;
+            // 清理临时切片结果目录
+            var tempDir = GetTempDir(checkpointId);
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }, ct);
     }
 
     public async Task<IReadOnlyList<CheckpointSummary>> ListAsync(CancellationToken ct = default)
@@ -98,11 +101,17 @@ public class JsonCheckpointStore : ICheckpointStore, IDisposable
                 using var doc = JsonDocument.Parse(json);
                 var meta = doc.RootElement.GetProperty("Metadata");
 
+                var statusRaw = meta.GetProperty("Status").GetString() ?? "Failed";
+                if (!Enum.TryParse<CheckpointStatus>(statusRaw, out var status))
+                {
+                    status = CheckpointStatus.Failed;
+                }
+
                 results.Add(new CheckpointSummary
                 {
                     CheckpointId = meta.GetProperty("CheckpointId").GetString() ?? Path.GetFileNameWithoutExtension(file),
                     TaskType = meta.GetProperty("TaskType").GetString() ?? "unknown",
-                    Status = Enum.Parse<CheckpointStatus>(meta.GetProperty("Status").GetString() ?? "Failed"),
+                    Status = status,
                     CreatedAt = meta.TryGetProperty("CreatedAt", out var ca) ? ca.GetDateTime() : DateTime.MinValue,
                     UpdatedAt = meta.TryGetProperty("UpdatedAt", out var ua) ? ua.GetDateTime() : DateTime.MinValue
                 });
@@ -110,7 +119,7 @@ public class JsonCheckpointStore : ICheckpointStore, IDisposable
             catch (Exception ex)
             {
                 // 跳过损坏的文件，但记录日志以便排查
-                System.Diagnostics.Debug.WriteLine($"跳过损坏的 checkpoint 文件：{file}，原因：{ex.Message}");
+                _logger?.LogWarning(ex, "跳过损坏的 checkpoint 文件：{File}", file);
             }
         }
 

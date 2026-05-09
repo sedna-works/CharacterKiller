@@ -51,12 +51,12 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
         }
     }
 
-    public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken ct = default)
+    public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken ct = default, IProgress<string>? progress = null)
     {
         await _concurrencyLimit.WaitAsync(ct);
         try
         {
-            return await CompleteInternalAsync(systemPrompt, userPrompt, ct);
+            return await CompleteInternalAsync(systemPrompt, userPrompt, ct, progress);
         }
         finally
         {
@@ -64,7 +64,7 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
         }
     }
 
-    private async Task<string> CompleteInternalAsync(string systemPrompt, string userPrompt, CancellationToken ct)
+    private async Task<string> CompleteInternalAsync(string systemPrompt, string userPrompt, CancellationToken ct, IProgress<string>? progress)
     {
         var request = new ChatCompletionRequest
         {
@@ -103,9 +103,14 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
                     throw new HttpRequestException($"LLM API 错误: {(int)response.StatusCode} - {errorBody}");
                 }
 
-                var fullContent = await ReadStreamAsync(response, _logger, requestCts.Token);
-                Console.WriteLine();
-                Console.Out.Flush();
+                var fullContent = await ReadStreamAsync(response, _logger, requestCts.Token, progress);
+
+                // 当未提供外部 progress 时，保持向后兼容的默认控制台换行
+                if (progress == null)
+                {
+                    Console.WriteLine();
+                    Console.Out.Flush();
+                }
 
                 if (string.IsNullOrWhiteSpace(fullContent))
                 {
@@ -121,17 +126,27 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
     }
 
     /// <summary>
-    /// 读取 SSE 流式响应，实时输出到控制台。
+    /// 读取 SSE 流式响应。
+    /// 若提供了 <paramref name="progress"/>，token 会通过其上报，不再直接写控制台；
+    /// 若未提供，保持向后兼容的默认控制台输出行为（含 spinner）。
     /// </summary>
-    private static async Task<string> ReadStreamAsync(HttpResponseMessage response, ILogger logger, CancellationToken ct)
+    private static async Task<string> ReadStreamAsync(HttpResponseMessage response, ILogger logger, CancellationToken ct, IProgress<string>? progress)
     {
         var sb = new StringBuilder();
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
-        // 启动等待第一个 token 的进度动画
-        var spinnerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var spinnerTask = RunSpinnerAsync(spinnerCts.Token);
+        // 启动等待第一个 token 的进度动画（仅在无外部 progress 时内部显示）
+        Task? spinnerTask = null;
+        CancellationTokenSource? spinnerCts = null;
+        var useConsole = progress == null;
+
+        if (useConsole)
+        {
+            spinnerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            spinnerTask = RunSpinnerAsync(spinnerCts.Token);
+        }
+
         var firstTokenReceived = false;
 
         while (!ct.IsCancellationRequested)
@@ -167,13 +182,27 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
                     if (!firstTokenReceived)
                     {
                         firstTokenReceived = true;
-                        spinnerCts.Cancel();
-                        try { await spinnerTask; } catch { }
-                        Console.Write("\r                      \r"); // 清除进度行
+                        if (spinnerCts != null)
+                        {
+                            spinnerCts.Cancel();
+                            if (spinnerTask != null)
+                            {
+                                try { await spinnerTask; } catch { }
+                            }
+                            Console.Write("\r                      \r"); // 清除进度行
+                        }
                     }
 
                     sb.Append(delta);
-                    Console.Write(delta);
+
+                    if (useConsole)
+                    {
+                        Console.Write(delta);
+                    }
+                    else
+                    {
+                        progress!.Report(delta);
+                    }
                 }
             }
             catch (JsonException ex)
@@ -184,10 +213,13 @@ public class OpenAiCompatibleClient : ILlmClient, IDisposable
         }
 
         // 如果流结束但从未收到 token，取消 spinner
-        if (!firstTokenReceived)
+        if (!firstTokenReceived && spinnerCts != null)
         {
             spinnerCts.Cancel();
-            try { await spinnerTask; } catch { }
+            if (spinnerTask != null)
+            {
+                try { await spinnerTask; } catch { }
+            }
             Console.Write("\r                      \r");
         }
 

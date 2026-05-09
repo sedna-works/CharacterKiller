@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CharacterKiller.Core.Interfaces;
@@ -148,57 +147,10 @@ public class SummarizePipeline
                 CancellationToken = ct
             };
 
-            try
+            await Parallel.ForEachAsync(pending, options, async (index, innerCt) =>
             {
-                await Parallel.ForEachAsync(pending, options, async (index, innerCt) =>
-                {
-                    _logger.LogInformation("处理切片 {Index}/{Total}", index + 1, chunks.Count);
-
-                    var chunk = chunks[index];
-                    var userPrompt = SummarizePromptBuilder.BuildUserPrompt(taskConfig.CharacterName, chunk.Content);
-
-                    try
-                    {
-                        Console.WriteLine($"[Summarize 切片 {index + 1}] 开始流式生成...");
-
-                        var result = await _llmClient.CompleteAsync(systemPrompt, userPrompt, innerCt);
-
-                        // 保存切片结果到独立文件（大内容分离）
-                        await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, innerCt);
-
-                        lock (progressLock)
-                        {
-                            checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.md";
-                            checkpoint.Progress.CompletedItems.Add(index);
-                            checkpoint.Progress.PendingItems.Remove(index);
-                            checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
-                        }
-
-                        await checkpointStore.SaveAsync(checkpoint, innerCt);
-                        _logger.LogInformation("切片 {Index} 完成", index + 1);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "切片 {Index} 处理失败", index + 1);
-
-                        lock (progressLock)
-                        {
-                            checkpoint.Progress.FailedItems.Add(index);
-                            checkpoint.Progress.PendingItems.Remove(index);
-                            checkpoint.Metadata.Status = CheckpointStatus.Failed;
-                        }
-
-                        await checkpointStore.SaveAsync(checkpoint, innerCt);
-                        throw;
-                    }
-                });
-            }
-            catch (AggregateException aex)
-            {
-                // Parallel.ForEachAsync 会将异常包装为 AggregateException
-                // 提取第一个内部异常重新抛出，保持日志简洁
-                throw aex.InnerExceptions.FirstOrDefault() ?? aex;
-            }
+                await ProcessChunkAsync(index, chunks, systemPrompt, checkpoint, checkpointId, checkpointStore, innerCt, progressLock);
+            });
         }
 
         // 7. 汇总所有结果
@@ -235,7 +187,8 @@ public class SummarizePipeline
         CheckpointState<SummarizeTaskState> checkpoint,
         string checkpointId,
         ICheckpointStore checkpointStore,
-        CancellationToken ct)
+        CancellationToken ct,
+        object? progressLock = null)
     {
         _logger.LogInformation("处理切片 {Index}/{Total}", index + 1, chunks.Count);
 
@@ -254,10 +207,24 @@ public class SummarizePipeline
 
             // 保存切片结果到独立文件（大内容分离）
             await checkpointStore.SaveSliceResultAsync(checkpointId, index, result, ct);
-            checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.md";
-            checkpoint.Progress.CompletedItems.Add(index);
-            checkpoint.Progress.PendingItems.Remove(index);
-            checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
+
+            if (progressLock != null)
+            {
+                lock (progressLock)
+                {
+                    checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.md";
+                    checkpoint.Progress.CompletedItems.Add(index);
+                    checkpoint.Progress.PendingItems.Remove(index);
+                    checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
+                }
+            }
+            else
+            {
+                checkpoint.TaskState.SliceOutputFiles[index] = $"slice_{index}.md";
+                checkpoint.Progress.CompletedItems.Add(index);
+                checkpoint.Progress.PendingItems.Remove(index);
+                checkpoint.Progress.CurrentStep = checkpoint.Progress.CompletedItems.Count;
+            }
 
             await checkpointStore.SaveAsync(checkpoint, ct);
             _logger.LogInformation("切片 {Index} 完成", index + 1);
@@ -265,9 +232,23 @@ public class SummarizePipeline
         catch (Exception ex)
         {
             _logger.LogError(ex, "切片 {Index} 处理失败", index + 1);
-            checkpoint.Progress.FailedItems.Add(index);
-            checkpoint.Progress.PendingItems.Remove(index);
-            checkpoint.Metadata.Status = CheckpointStatus.Failed;
+
+            if (progressLock != null)
+            {
+                lock (progressLock)
+                {
+                    checkpoint.Progress.FailedItems.Add(index);
+                    checkpoint.Progress.PendingItems.Remove(index);
+                    checkpoint.Metadata.Status = CheckpointStatus.Failed;
+                }
+            }
+            else
+            {
+                checkpoint.Progress.FailedItems.Add(index);
+                checkpoint.Progress.PendingItems.Remove(index);
+                checkpoint.Metadata.Status = CheckpointStatus.Failed;
+            }
+
             await checkpointStore.SaveAsync(checkpoint, ct);
             throw;
         }

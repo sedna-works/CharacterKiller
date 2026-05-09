@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CharacterKiller.Core.Interfaces;
@@ -184,26 +183,90 @@ public class SkillsPipeline
 
     private static Dictionary<string, string> ParseSkillPack(string response)
     {
-        // 清理可能的 markdown 代码块
-        var cleaned = response.Trim();
-        if (cleaned.StartsWith("```"))
+        var trimmed = response.Trim();
+
+        // 策略1: 直接解析裸 JSON
+        if (TryParseJsonDict(trimmed, out var directResult))
+            return directResult;
+
+        // 策略2: 从 markdown 代码块中提取深度匹配的 JSON
+        var extracted = ExtractBalancedJson(trimmed);
+        if (extracted != null && TryParseJsonDict(extracted, out var extractedResult))
+            return extractedResult;
+
+        throw new InvalidOperationException("无法从 LLM 响应中解析出合法 JSON");
+    }
+
+    private static bool TryParseJsonDict(string text, out Dictionary<string, string> result)
+    {
+        try
         {
-            var start = cleaned.IndexOf('{');
-            var end = cleaned.LastIndexOf('}');
-            if (start >= 0 && end > start)
+            var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(text, JsonOptions);
+            if (dict != null && dict.Count > 0)
             {
-                cleaned = cleaned[start..(end + 1)];
+                result = dict;
+                return true;
+            }
+        }
+        catch { }
+
+        result = new Dictionary<string, string>();
+        return false;
+    }
+
+    /// <summary>
+    /// 从文本中提取首个花括号深度匹配的 JSON 片段，能正确处理字符串内的 { 和 }。
+    /// </summary>
+    private static string? ExtractBalancedJson(string text)
+    {
+        int start = text.IndexOf('{');
+        if (start < 0) return null;
+
+        int depth = 0;
+        bool inString = false;
+        bool escape = false;
+
+        for (int i = start; i < text.Length; i++)
+        {
+            char c = text[i];
+
+            if (inString)
+            {
+                if (escape)
+                {
+                    escape = false;
+                }
+                else if (c == '\\')
+                {
+                    escape = true;
+                }
+                else if (c == '"')
+                {
+                    inString = false;
+                }
+            }
+            else
+            {
+                if (c == '"')
+                {
+                    inString = true;
+                }
+                else if (c == '{')
+                {
+                    depth++;
+                }
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        return text[start..(i + 1)];
+                    }
+                }
             }
         }
 
-        var result = JsonSerializer.Deserialize<Dictionary<string, string>>(cleaned, JsonOptions);
-
-        if (result == null || result.Count == 0)
-        {
-            throw new InvalidOperationException("Skills JSON 解析结果为空");
-        }
-
-        return result;
+        return null;
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()

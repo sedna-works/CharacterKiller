@@ -42,7 +42,11 @@ public static class ServiceRegistrar
         // 基础实例以当前工作目录为基目录，实际 Pipeline 中通过 WithBaseDir 指定任务级子目录
         if (config.Checkpoint.Enabled)
         {
-            services.AddSingleton<ICheckpointStore>(new JsonCheckpointStore(Directory.GetCurrentDirectory()));
+            services.AddSingleton<ICheckpointStore>(sp =>
+            {
+                var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+                return new JsonCheckpointStore(Directory.GetCurrentDirectory(), loggerFactory.CreateLogger<JsonCheckpointStore>());
+            });
         }
         else
         {

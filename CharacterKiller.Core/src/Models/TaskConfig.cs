@@ -19,8 +19,6 @@ public class TaskConfig
 
     public string CharacterName { get; set; } = string.Empty;
 
-    public string? VndbCharacterId { get; set; }
-
     public string OutputDirectory { get; set; } = "output";
 
     /// <summary>

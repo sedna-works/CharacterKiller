@@ -122,47 +122,16 @@ skillsCommand.SetAction(async (parseResult, cancellationToken) =>
 });
 
 runCommand.SetAction(async (parseResult, cancellationToken) =>
-{
-    var (config, provider) = BuildConfigAndServices(parseResult, configOption);
-    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("CharacterKiller");
-
-    if (config.Jobs.Count > 0)
-    {
-        logger.LogInformation("检测到批量任务，共 {Count} 个角色，并发度={Concurrency}", config.Jobs.Count, config.Execution.MaxJobConcurrency);
-        var summarizePipeline = provider.GetRequiredService<SummarizePipeline>();
-        var skillsPipeline = provider.GetRequiredService<SkillsPipeline>();
-
-        await RunJobsAsync(
-            config.Jobs.Select(MapJobToTask),
-            config.Execution.MaxJobConcurrency,
-            async (taskConfig, ct) =>
-            {
-                logger.LogInformation("批量 Run：角色={Character}，文件数={FileCount}", taskConfig.CharacterName, taskConfig.InputFiles.Count);
-                await summarizePipeline.RunAsync(taskConfig, config.Slicing, ct);
-                await skillsPipeline.RunAsync(taskConfig, ct);
-            },
-            cancellationToken);
-    }
-    else
-    {
-        ApplyTaskOverrides(config, parseResult, inputOption, characterOption, modeOption);
-        ValidateTaskConfig(config.Task, requireInput: true);
-        logger.LogInformation("执行 Run：角色={Character}，剧本={Input}，模式={Mode}", config.Task.CharacterName, config.Task.InputFile, config.Task.OutputMode);
-
-        var summarize = provider.GetRequiredService<SummarizePipeline>();
-        await summarize.RunAsync(config.Task, config.Slicing, cancellationToken);
-
-        var skills = provider.GetRequiredService<SkillsPipeline>();
-        await skills.RunAsync(config.Task, cancellationToken);
-    }
-
-    logger.LogInformation("全部流程执行完毕");
-    return 0;
-});
+    await RunFullPipelineAsync(parseResult, cancellationToken));
 
 rootCommand.SetAction(async (parseResult, cancellationToken) =>
 {
     // 没有子命令时默认执行 run
+    return await RunFullPipelineAsync(parseResult, cancellationToken);
+});
+
+async Task<int> RunFullPipelineAsync(ParseResult parseResult, CancellationToken cancellationToken)
+{
     var (config, provider) = BuildConfigAndServices(parseResult, configOption);
     var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger("CharacterKiller");
 
@@ -198,7 +167,7 @@ rootCommand.SetAction(async (parseResult, cancellationToken) =>
 
     logger.LogInformation("全部流程执行完毕");
     return 0;
-});
+}
 
 // --- 入口 ---
 return await rootCommand.Parse(args).InvokeAsync();
@@ -211,8 +180,7 @@ static (CliConfig Config, IServiceProvider Provider) BuildConfigAndServices(Pars
 
     if (!File.Exists(configPath))
     {
-        Console.Error.WriteLine($"配置文件不存在：{configPath}");
-        Environment.Exit(1);
+        throw new FileNotFoundException($"配置文件不存在：{configPath}");
     }
 
     var configuration = new ConfigurationBuilder()
@@ -228,10 +196,7 @@ static (CliConfig Config, IServiceProvider Provider) BuildConfigAndServices(Pars
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"配置文件解析失败：{configPath}");
-        Console.Error.WriteLine($"错误详情：{ex.Message}");
-        Environment.Exit(1);
-        throw;
+        throw new InvalidOperationException($"配置文件解析失败：{configPath}，原因：{ex.Message}", ex);
     }
 
     var apiKey = Environment.GetEnvironmentVariable("GCS_APIKEY");
@@ -258,7 +223,6 @@ static TaskConfig MapJobToTask(JobConfig job)
     {
         InputFiles = job.InputFiles,
         CharacterName = job.CharacterName,
-        VndbCharacterId = job.VndbCharacterId,
         OutputDirectory = job.OutputDirectory,
         OutputMode = job.OutputMode,
         SkillsMaxContextChars = job.SkillsMaxContextChars
@@ -318,14 +282,12 @@ static void ValidateTaskConfig(TaskConfig task, bool requireInput)
 {
     if (requireInput && task.InputFiles.Count == 0 && string.IsNullOrWhiteSpace(task.InputFile))
     {
-        Console.Error.WriteLine("错误：未指定剧本文件。请使用 --input 或 -i 参数指定，或在配置文件中设置 Jobs/InputFiles。");
-        Environment.Exit(1);
+        throw new InvalidOperationException("未指定剧本文件。请使用 --input 或 -i 参数指定，或在配置文件中设置 Jobs/InputFiles。");
     }
 
     if (string.IsNullOrWhiteSpace(task.CharacterName))
     {
-        Console.Error.WriteLine("错误：未指定角色名称。请使用 --character 或 -n 参数指定，或在配置文件中设置 Jobs/CharacterName。");
-        Environment.Exit(1);
+        throw new InvalidOperationException("未指定角色名称。请使用 --character 或 -n 参数指定，或在配置文件中设置 Jobs/CharacterName。");
     }
 }
 
